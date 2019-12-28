@@ -16,7 +16,7 @@ import { Action } from 'vs/base/common/actions';
 import { dispose, IDisposable } from 'vs/base/common/lifecycle';
 import { VIEWLET_ID, IExplorerService, IFilesConfiguration } from 'vs/workbench/contrib/files/common/files';
 import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
-import { IFileService } from 'vs/platform/files/common/files';
+import { IFileService, IFileStat } from 'vs/platform/files/common/files';
 import { toResource, SideBySideEditor } from 'vs/workbench/common/editor';
 import { ExplorerViewPaneContainer } from 'vs/workbench/contrib/files/browser/explorerViewlet';
 import { IQuickOpenService } from 'vs/platform/quickOpen/common/quickOpen';
@@ -41,7 +41,6 @@ import { CLOSE_EDITORS_AND_GROUP_COMMAND_ID } from 'vs/workbench/browser/parts/e
 import { coalesce } from 'vs/base/common/arrays';
 import { ExplorerItem, NewExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
 import { onUnexpectedError, getErrorMessage } from 'vs/base/common/errors';
-import { asDomUri, triggerDownload } from 'vs/base/browser/dom';
 import { mnemonicButtonLabel } from 'vs/base/common/labels';
 import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
 import { IWorkingCopyService, IWorkingCopy } from 'vs/workbench/services/workingCopy/common/workingCopyService';
@@ -977,6 +976,7 @@ export const cutFileHandler = (accessor: ServicesAccessor) => {
 export const DOWNLOAD_COMMAND_ID = 'explorer.download';
 const downloadFileHandler = (accessor: ServicesAccessor) => {
 	const textFileService = accessor.get(ITextFileService);
+	const fileService = accessor.get(IFileService);
 	const fileDialogService = accessor.get(IFileDialogService);
 	const explorerService = accessor.get(IExplorerService);
 	const stats = explorerService.getContext(true);
@@ -988,8 +988,33 @@ const downloadFileHandler = (accessor: ServicesAccessor) => {
 		}
 
 		if (isWeb) {
+
+			async function downloadFile(targetFolder: any, name: string, resource: URI): Promise<void> {
+				const targetFile = await targetFolder.getFile(name, { create: true });
+				const targetFileWriter = await targetFile.createWriter();
+				await targetFileWriter.write(0, (await fileService.readFile(resource)).value.buffer);
+				await targetFileWriter.close();
+			}
+
+			async function downloadFolder(folder: IFileStat, targetFolder: any): Promise<void> {
+				if (folder.children) {
+					for (const child of folder.children) {
+						if (child.isFile) {
+							await downloadFile(targetFolder, child.name, child.resource);
+						} else {
+							const childFolder = await targetFolder.getDirectory(child.name, { create: true });
+							const resolvedChildFolder = await fileService.resolve(child.resource);
+							await downloadFolder(resolvedChildFolder, childFolder);
+						}
+					}
+				}
+			}
+
+			const targetFolder = await (window as any).chooseFileSystemEntries({ type: 'openDirectory' });
 			if (!s.isDirectory) {
-				triggerDownload(asDomUri(s.resource), s.name);
+				await downloadFile(targetFolder, s.name, s.resource);
+			} else {
+				await downloadFolder(await fileService.resolve(s.resource), targetFolder);
 			}
 		} else {
 			let defaultUri = s.isDirectory ? fileDialogService.defaultFolderPath() : fileDialogService.defaultFilePath();

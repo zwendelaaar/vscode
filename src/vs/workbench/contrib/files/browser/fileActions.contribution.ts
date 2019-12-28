@@ -478,7 +478,7 @@ MenuRegistry.appendMenuItem(MenuId.ExplorerContext, ({
 		id: DOWNLOAD_COMMAND_ID,
 		title: DOWNLOAD_LABEL,
 	},
-	when: ContextKeyExpr.or(ContextKeyExpr.and(ResourceContextKey.Scheme.notEqualsTo(Schemas.file), IsWebContext.toNegated()), ContextKeyExpr.and(ResourceContextKey.Scheme.notEqualsTo(Schemas.file), ExplorerFolderContext.toNegated(), ExplorerRootContext.toNegated()))
+	when: ContextKeyExpr.or(ResourceContextKey.Scheme.notEqualsTo(Schemas.file), IsWebContext)
 }));
 
 MenuRegistry.appendMenuItem(MenuId.ExplorerContext, {
