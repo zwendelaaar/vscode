@@ -162,11 +162,25 @@ export class CodeWindow extends Disposable implements ICodeWindow {
 				minHeight: CodeWindow.MIN_HEIGHT,
 				show: !isFullscreenOrMaximized,
 				title: product.nameLong,
-				webPreferences: {
-					nodeIntegration: true,
-					nodeIntegrationInWorker: RUN_TEXTMATE_IN_WORKER,
-					webviewTag: true
-				}
+				webPreferences: this.environmentService.sandbox ?
+
+					// Sandbox
+					{
+						nodeIntegration: false,
+						nodeIntegrationInSubFrames: false,
+						nodeIntegrationInWorker: false,
+						sandbox: true,
+						webviewTag: true,
+						contextIsolation: true,
+						preload: path.join(this.environmentService.appRoot, 'out/vs/code/electron-sandbox/workbench/preload.js'),
+					} :
+
+					// No Sandbox
+					{
+						nodeIntegration: true,
+						nodeIntegrationInWorker: RUN_TEXTMATE_IN_WORKER,
+						webviewTag: true
+					}
 			};
 
 			// Apply icon to window
@@ -674,6 +688,10 @@ export class CodeWindow extends Disposable implements ICodeWindow {
 					this._win.webContents.openDevTools();
 				}
 			}, 10000);
+
+			if (this.environmentService.sandbox) {
+				this._win.webContents.openDevTools();
+			}
 		}
 
 		// Event
@@ -770,7 +788,14 @@ export class CodeWindow extends Disposable implements ICodeWindow {
 	}
 
 	private doGetUrl(config: object): string {
-		return `${require.toUrl('vs/code/electron-browser/workbench/workbench.html')}?config=${encodeURIComponent(JSON.stringify(config))}`;
+		let index: string;
+		if (this.environmentService.sandbox) {
+			index = 'vs/code/electron-sandbox/workbench/workbench-dev.html';
+		} else {
+			index = 'vs/code/electron-browser/workbench/workbench.html';
+		}
+
+		return `${require.toUrl(index)}?config=${encodeURIComponent(JSON.stringify(config))}`;
 	}
 
 	serializeWindowState(): IWindowState {

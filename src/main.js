@@ -44,9 +44,11 @@ if (portable.isPortable) {
 setCurrentWorkingDirectory();
 
 // Register custom schemes with privileges
-protocol.registerSchemesAsPrivileged([
-	{ scheme: 'vscode-resource', privileges: { secure: true, supportFetchAPI: true, corsEnabled: true } }
-]);
+const schemes = [{ scheme: 'vscode-resource', privileges: { secure: true, supportFetchAPI: true, corsEnabled: true } }];
+if (args['sandbox']) {
+	schemes.push({ scheme: 'vscode-file', privileges: { secure: true, supportFetchAPI: true, corsEnabled: true } });
+}
+protocol.registerSchemesAsPrivileged(schemes);
 
 // Global app listeners
 registerListeners();

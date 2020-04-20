@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { app, ipcMain as ipc, systemPreferences, shell, Event, contentTracing, protocol, powerMonitor, IpcMainEvent, BrowserWindow, dialog } from 'electron';
-import { IProcessEnvironment, isWindows, isMacintosh } from 'vs/base/common/platform';
+import { IProcessEnvironment, isWindows, isMacintosh, isLinux } from 'vs/base/common/platform';
 import { WindowsMainService } from 'vs/platform/windows/electron-main/windowsMainService';
 import { IWindowOpenable } from 'vs/platform/windows/common/windows';
 import { OpenContext } from 'vs/platform/windows/node/window';
@@ -56,7 +56,9 @@ import { MenubarMainService } from 'vs/platform/menubar/electron-main/menubarMai
 import { RunOnceScheduler } from 'vs/base/common/async';
 import { registerContextMenuListener } from 'vs/base/parts/contextmenu/electron-main/contextmenu';
 import { homedir } from 'os';
-import { join, sep, posix } from 'vs/base/common/path';
+import { URL } from 'url';
+import { join, sep, posix, normalize } from 'vs/base/common/path';
+import { isEqualOrParent } from 'vs/base/common/extpath';
 import { localize } from 'vs/nls';
 import { Schemas } from 'vs/base/common/network';
 import { SnapUpdateService } from 'vs/platform/update/electron-main/updateService.snap';
@@ -390,6 +392,20 @@ export class CodeApplication extends Disposable {
 
 		// Setup Auth Handler
 		this._register(new ProxyAuthHandler());
+
+		// Setup vscode-file provider
+		if (this.environmentService.sandbox) {
+			protocol.registerFileProtocol('vscode-file', (request, callback) => {
+				const url = new URL(request.url.substr(request.url.lastIndexOf('vscode-file://')));
+				const path = normalize(`${this.environmentService.appRoot}/${url.pathname}`);
+
+				if (isEqualOrParent(path, this.environmentService.appRoot, !isLinux)) {
+					return callback({ path });
+				}
+
+				return callback(); // invalid request (e.g. outside appRoot)
+			});
+		}
 
 		// Open Windows
 		const windows = appInstantiationService.invokeFunction(accessor => this.openFirstWindow(accessor, electronIpcServer, sharedProcessClient));

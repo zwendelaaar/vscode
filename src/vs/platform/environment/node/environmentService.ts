@@ -45,6 +45,8 @@ export interface INativeEnvironmentService extends IEnvironmentService {
 	driverVerbose: boolean;
 
 	disableUpdates: boolean;
+
+	sandbox: boolean;
 }
 
 export class EnvironmentService implements INativeEnvironmentService {
@@ -250,6 +252,8 @@ export class EnvironmentService implements INativeEnvironmentService {
 	get driverVerbose(): boolean { return !!this._args['driver-verbose']; }
 
 	get disableTelemetry(): boolean { return !!this._args['disable-telemetry']; }
+
+	get sandbox(): boolean { return !this.isBuilt && !!this._args['sandbox']; }
 
 	constructor(private _args: ParsedArgs, private _execPath: string) {
 		if (!process.env['VSCODE_LOGS']) {

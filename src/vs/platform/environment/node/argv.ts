@@ -72,6 +72,7 @@ export interface ParsedArgs {
 	'force'?: boolean;
 	'force-user-env'?: boolean;
 	'sync'?: 'on' | 'off';
+	sandbox?: boolean;
 
 	// chromium command line args: https://electronjs.org/docs/all#supported-chrome-command-line-switches
 	'no-proxy-server'?: boolean;
@@ -187,6 +188,7 @@ export const OPTIONS: OptionDescriptions<Required<ParsedArgs>> = {
 	'trace-category-filter': { type: 'string' },
 	'trace-options': { type: 'string' },
 	'force-user-env': { type: 'boolean' },
+	sandbox: { type: 'boolean' },
 
 	// chromium flags
 	'no-proxy-server': { type: 'boolean' },
