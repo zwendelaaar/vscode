@@ -46,7 +46,7 @@ setCurrentWorkingDirectory();
 // Register custom schemes with privileges
 const schemes = [{ scheme: 'vscode-resource', privileges: { secure: true, supportFetchAPI: true, corsEnabled: true } }];
 if (args['sandbox']) {
-	schemes.push({ scheme: 'vscode-file', privileges: { secure: true, supportFetchAPI: true, corsEnabled: true } });
+	schemes.push({ scheme: 'vscode-file', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } });
 }
 protocol.registerSchemesAsPrivileged(schemes);
 
