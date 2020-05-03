@@ -85,7 +85,7 @@ export class FileWatcher extends Disposable {
 		}
 
 		// Handle emit through delayer to accommodate for bulk changes and thus reduce spam
-		this.fileChangesDelayer.trigger(() => {
+		this.fileChangesDelayer.trigger(async () => {
 			const fileChanges = this.fileChangesBuffer;
 			this.fileChangesBuffer = [];
 
@@ -104,7 +104,7 @@ export class FileWatcher extends Disposable {
 				this.onDidFilesChange(normalizedFileChanges);
 			}
 
-			return Promise.resolve();
+			return undefined;
 		});
 	}
 
