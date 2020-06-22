@@ -25,6 +25,7 @@ interface IResourceUriProvider {
 interface IStaticExtension {
 	packageJSON: IExtensionManifest;
 	extensionLocation: URI;
+	isBuiltin?: boolean;
 }
 
 interface ICommontTelemetryPropertiesResolver {
@@ -33,6 +34,17 @@ interface ICommontTelemetryPropertiesResolver {
 
 interface IExternalUriResolver {
 	(uri: URI): Promise<URI>;
+}
+
+interface ITunnelProvider {
+	/**
+	 * Support for creating tunnels.
+	 */
+	tunnelFactory?: ITunnelFactory;
+	/**
+	 * Support for filtering candidate ports
+	 */
+	showPortCandidate?: IShowPortCandidate;
 }
 
 interface ITunnelFactory {
@@ -89,9 +101,14 @@ interface ICommand {
 interface IHomeIndicator {
 
 	/**
-	 * The identifier of the command to run when clicking the home indicator.
+	 * The link to open when clicking the home indicator.
 	 */
-	command: string;
+	href: string;
+
+	/**
+	 * @deprecated use `href` instead.
+	 */
+	command?: string;
 
 	/**
 	 * The icon name for the home indicator. This needs to be one of the existing
@@ -103,6 +120,65 @@ interface IHomeIndicator {
 	 * A tooltip that will appear while hovering over the home indicator.
 	 */
 	title: string;
+}
+
+interface IDefaultSideBarLayout {
+	visible?: boolean;
+	containers?: ({
+		id: 'explorer' | 'run' | 'scm' | 'search' | 'extensions' | 'remote' | string;
+		active: true;
+		order?: number;
+		views?: {
+			id: string;
+			order?: number;
+			visible?: boolean;
+			collapsed?: boolean;
+		}[];
+	} | {
+		id: 'explorer' | 'run' | 'scm' | 'search' | 'extensions' | 'remote' | string;
+		active?: false;
+		order?: number;
+		visible?: boolean;
+		views?: {
+			id: string;
+			order?: number;
+			visible?: boolean;
+			collapsed?: boolean;
+		}[];
+	})[];
+}
+
+interface IDefaultPanelLayout {
+	visible?: boolean;
+	containers?: ({
+		id: 'terminal' | 'debug' | 'problems' | 'output' | 'comments' | string;
+		order?: number;
+		active: true;
+	} | {
+		id: 'terminal' | 'debug' | 'problems' | 'output' | 'comments' | string;
+		order?: number;
+		active?: false;
+		visible?: boolean;
+	})[];
+}
+
+interface IDefaultView {
+	readonly id: string;
+}
+
+interface IDefaultEditor {
+	readonly uri: UriComponents;
+	readonly openOnlyIfExists?: boolean;
+	readonly openWith?: string;
+}
+
+interface IDefaultLayout {
+	/** @deprecated Use views instead */
+	readonly sidebar?: IDefaultSideBarLayout;
+	/** @deprecated Use views instead */
+	readonly panel?: IDefaultPanelLayout;
+	readonly views?: IDefaultView[];
+	readonly editors?: IDefaultEditor[];
 }
 
 interface IWorkbenchConstructionOptions {
@@ -142,14 +218,10 @@ interface IWorkbenchConstructionOptions {
 	readonly resolveExternalUri?: IExternalUriResolver;
 
 	/**
-	 * Support for creating tunnels.
+	 * A provider for supplying tunneling functionality,
+	 * such as creating tunnels and showing candidate ports to forward.
 	 */
-	readonly tunnelFactory?: ITunnelFactory;
-
-	/**
-	 * Support for filtering candidate ports
-	 */
-	readonly showCandidate?: IShowPortCandidate;
+	readonly tunnelProvider?: ITunnelProvider;
 
 	//#endregion
 
@@ -166,6 +238,16 @@ interface IWorkbenchConstructionOptions {
 	 * state like settings, keybindings, UI state (e.g. opened editors) and snippets.
 	 */
 	userDataProvider?: IFileSystemProvider;
+
+	/**
+	 * Session id of the current authenticated user
+	 */
+	readonly authenticationSessionId?: string;
+
+	/**
+	 * Enables user data sync by default and syncs into the current authenticated user account using the provided [authenticationSessionId}(#authenticationSessionId).
+	 */
+	readonly enableSyncByDefault?: boolean;
 
 	/**
 	 * The credentials provider to store and retrieve secrets.
@@ -204,6 +286,11 @@ interface IWorkbenchConstructionOptions {
 	 * Optional home indicator to appear above the hamburger menu in the activity bar.
 	 */
 	readonly homeIndicator?: IHomeIndicator;
+
+	/**
+	 * Optional default layout to apply on first time the workspace is opened.
+	 */
+	readonly defaultLayout?: IDefaultLayout;
 
 	//#endregion
 
@@ -339,6 +426,7 @@ export {
 	IExternalUriResolver,
 
 	// Tunnel
+	ITunnelProvider,
 	ITunnelFactory,
 	ITunnel,
 	ITunnelOptions,
@@ -351,7 +439,14 @@ export {
 	commands,
 
 	// Home Indicator
-	IHomeIndicator
+	IHomeIndicator,
+
+	// Default layout
+	IDefaultView,
+	IDefaultEditor,
+	IDefaultLayout,
+	IDefaultPanelLayout,
+	IDefaultSideBarLayout
 };
 
 //#endregion

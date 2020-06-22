@@ -20,7 +20,7 @@ export interface IExtensionManagementServer {
 }
 
 export interface IExtensionManagementServerService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 	readonly localExtensionManagementServer: IExtensionManagementServer | null;
 	readonly remoteExtensionManagementServer: IExtensionManagementServer | null;
 	getExtensionManagementServer(location: URI): IExtensionManagementServer | null;
@@ -38,7 +38,7 @@ export const enum EnablementState {
 export const IWorkbenchExtensionEnablementService = createDecorator<IWorkbenchExtensionEnablementService>('extensionEnablementService');
 
 export interface IWorkbenchExtensionEnablementService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 
 	readonly allUserExtensionsDisabled: boolean;
 
@@ -63,6 +63,14 @@ export interface IWorkbenchExtensionEnablementService {
 	isEnabled(extension: IExtension): boolean;
 
 	/**
+	 * Returns `true` if the given extension identifier is disabled globally.
+	 * Extensions can be disabled globally or in workspace or both.
+	 * If an extension is disabled in both then enablement state shows only workspace.
+	 * This will
+	 */
+	isDisabledGlobally(extension: IExtension): boolean;
+
+	/**
 	 * Enable or disable the given extension.
 	 * if `workspace` is `true` then enablement is done for workspace, otherwise globally.
 	 *
@@ -85,11 +93,12 @@ export type RecommendationChangeNotification = {
 };
 
 export type DynamicRecommendation = 'dynamic';
+export type ConfigRecommendation = 'config';
 export type ExecutableRecommendation = 'executable';
 export type CachedRecommendation = 'cached';
 export type ApplicationRecommendation = 'application';
 export type ExperimentalRecommendation = 'experimental';
-export type ExtensionRecommendationSource = IWorkspace | IWorkspaceFolder | URI | DynamicRecommendation | ExecutableRecommendation | CachedRecommendation | ApplicationRecommendation | ExperimentalRecommendation;
+export type ExtensionRecommendationSource = IWorkspace | IWorkspaceFolder | URI | DynamicRecommendation | ExecutableRecommendation | CachedRecommendation | ApplicationRecommendation | ExperimentalRecommendation | ConfigRecommendation;
 
 export interface IExtensionRecommendation {
 	extensionId: string;
@@ -100,6 +109,7 @@ export const enum ExtensionRecommendationReason {
 	Workspace,
 	File,
 	Executable,
+	WorkspaceConfig,
 	DynamicWorkspace,
 	Experimental,
 	Application,
@@ -113,10 +123,11 @@ export interface IExtensionRecommendationReson {
 export const IExtensionRecommendationsService = createDecorator<IExtensionRecommendationsService>('extensionRecommendationsService');
 
 export interface IExtensionRecommendationsService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 
 	getAllRecommendationsWithReason(): IStringDictionary<IExtensionRecommendationReson>;
 	getFileBasedRecommendations(): IExtensionRecommendation[];
+	getConfigBasedRecommendations(): Promise<IExtensionRecommendation[]>;
 	getOtherRecommendations(): Promise<IExtensionRecommendation[]>;
 	getWorkspaceRecommendations(): Promise<IExtensionRecommendation[]>;
 	getKeymapRecommendations(): IExtensionRecommendation[];

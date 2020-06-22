@@ -34,6 +34,10 @@ export class TerminalHover extends Disposable implements ITerminalWidget {
 		super();
 	}
 
+	dispose() {
+		super.dispose();
+	}
+
 	attach(container: HTMLElement): void {
 		const target = new CellHoverTarget(container, this._targetOptions);
 		this._register(this._instantiationService.createInstance(HoverWidget, container, target, this._text, this._linkHandler, []));
@@ -60,7 +64,7 @@ class CellHoverTarget extends Widget implements IHoverTarget {
 		const width = (o.viewportRange.end.y > o.viewportRange.start.y ? o.terminalDimensions.width - o.viewportRange.start.x : o.viewportRange.end.x - o.viewportRange.start.x + 1) * o.cellDimensions.width;
 		const topTarget = $('div.terminal-hover-target.hoverHighlight');
 		topTarget.style.left = `${o.viewportRange.start.x * o.cellDimensions.width}px`;
-		topTarget.style.bottom = `${(o.terminalDimensions.height - o.viewportRange.start.y - 1) * o.cellDimensions.height - 1}px`;
+		topTarget.style.bottom = `${(o.terminalDimensions.height - o.viewportRange.start.y - 1) * o.cellDimensions.height}px`;
 		topTarget.style.width = `${width}px`;
 		topTarget.style.height = `${o.cellDimensions.height}px`;
 		targets.push(this._domNode.appendChild(topTarget));
@@ -69,7 +73,7 @@ class CellHoverTarget extends Widget implements IHoverTarget {
 		if (rowCount > 2) {
 			const middleTarget = $('div.terminal-hover-target.hoverHighlight');
 			middleTarget.style.left = `0px`;
-			middleTarget.style.bottom = `${(o.terminalDimensions.height - o.viewportRange.start.y - 1 - (rowCount - 2)) * o.cellDimensions.height - 1}px`;
+			middleTarget.style.bottom = `${(o.terminalDimensions.height - o.viewportRange.start.y - 1 - (rowCount - 2)) * o.cellDimensions.height}px`;
 			middleTarget.style.width = `${o.terminalDimensions.width * o.cellDimensions.width}px`;
 			middleTarget.style.height = `${(rowCount - 2) * o.cellDimensions.height}px`;
 			targets.push(this._domNode.appendChild(middleTarget));
@@ -79,7 +83,7 @@ class CellHoverTarget extends Widget implements IHoverTarget {
 		if (rowCount > 1) {
 			const bottomTarget = $('div.terminal-hover-target.hoverHighlight');
 			bottomTarget.style.left = `0px`;
-			bottomTarget.style.bottom = `${(o.terminalDimensions.height - o.viewportRange.end.y - 1) * o.cellDimensions.height - 1}px`;
+			bottomTarget.style.bottom = `${(o.terminalDimensions.height - o.viewportRange.end.y - 1) * o.cellDimensions.height}px`;
 			bottomTarget.style.width = `${(o.viewportRange.end.x + 1) * o.cellDimensions.width}px`;
 			bottomTarget.style.height = `${o.cellDimensions.height}px`;
 			targets.push(this._domNode.appendChild(bottomTarget));

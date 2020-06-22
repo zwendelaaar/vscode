@@ -28,7 +28,7 @@ import { IListVirtualDelegate } from 'vs/base/browser/ui/list/list';
 import { ITreeNode, ITreeFilter, TreeVisibility, TreeFilterResult, ITreeElement } from 'vs/base/browser/ui/tree/tree';
 import { IListAccessibilityProvider } from 'vs/base/browser/ui/list/listWidget';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { TreeResourceNavigator, WorkbenchCompressibleObjectTree } from 'vs/platform/list/browser/listService';
+import { WorkbenchCompressibleObjectTree } from 'vs/platform/list/browser/listService';
 import { dispose } from 'vs/base/common/lifecycle';
 import { createMatches, FuzzyScore } from 'vs/base/common/filters';
 import { DebugContentProvider } from 'vs/workbench/contrib/debug/common/debugContentProvider';
@@ -473,7 +473,6 @@ export class LoadedScriptsView extends ViewPane {
 				},
 				filter: this.filter,
 				accessibilityProvider: new LoadedSciptsAccessibilityProvider(),
-				ariaLabel: nls.localize({ comment: ['Debug is a noun in this context, not a verb.'], key: 'loadedScriptsAriaLabel' }, "Debug Loaded Scripts"),
 				overrideStyles: {
 					listBackground: this.getBackgroundColor()
 				}
@@ -492,9 +491,7 @@ export class LoadedScriptsView extends ViewPane {
 		}, 300);
 		this._register(this.changeScheduler);
 
-		const loadedScriptsNavigator = new TreeResourceNavigator(this.tree);
-		this._register(loadedScriptsNavigator);
-		this._register(loadedScriptsNavigator.onDidOpenResource(e => {
+		this._register(this.tree.onDidOpen(e => {
 			if (e.element instanceof BaseTreeItem) {
 				const source = e.element.getSource();
 				if (source && source.available) {
@@ -710,6 +707,10 @@ class LoadedScriptsRenderer implements ICompressibleTreeRenderer<BaseTreeItem, F
 }
 
 class LoadedSciptsAccessibilityProvider implements IListAccessibilityProvider<LoadedScriptsItem> {
+
+	getWidgetAriaLabel(): string {
+		return nls.localize({ comment: ['Debug is a noun in this context, not a verb.'], key: 'loadedScriptsAriaLabel' }, "Debug Loaded Scripts");
+	}
 
 	getAriaLabel(element: LoadedScriptsItem): string {
 

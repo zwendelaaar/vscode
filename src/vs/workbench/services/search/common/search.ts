@@ -18,6 +18,7 @@ import { Event } from 'vs/base/common/event';
 import { relative } from 'vs/base/common/path';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ResourceGlobMatcher } from 'vs/workbench/common/resources';
+import { isPromiseCanceledError } from 'vs/base/common/errors';
 
 export const VIEWLET_ID = 'workbench.view.search';
 export const PANEL_ID = 'workbench.panel.search';
@@ -31,7 +32,7 @@ export const ISearchService = createDecorator<ISearchService>('searchService');
  * A service that enables to search for files or with in files.
  */
 export interface ISearchService {
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 	textSearch(query: ITextQuery, token?: CancellationToken, onProgress?: (result: ISearchProgressItem) => void): Promise<ISearchComplete>;
 	fileSearch(query: IFileQuery, token?: CancellationToken): Promise<ISearchComplete>;
 	clearCache(cacheKey: string): Promise<void>;
@@ -183,7 +184,7 @@ export function resultIsMatch(result: ITextSearchResult): result is ITextSearchM
 }
 
 export interface IProgressMessage {
-	message?: string;
+	message: string;
 }
 
 export type ISearchProgressItem = IFileMatch | IProgressMessage;
@@ -192,8 +193,8 @@ export function isFileMatch(p: ISearchProgressItem): p is IFileMatch {
 	return !!(<IFileMatch>p).resource;
 }
 
-export function isProgressMessage(p: ISearchProgressItem): p is IProgressMessage {
-	return !isFileMatch(p);
+export function isProgressMessage(p: ISearchProgressItem | ISerializedSearchProgressItem): p is IProgressMessage {
+	return !!(p as IProgressMessage).message;
 }
 
 export interface ISearchCompleteStats {
@@ -349,7 +350,9 @@ export interface ISearchConfigurationProperties {
 	searchOnTypeDebouncePeriod: number;
 	searchEditor: {
 		doubleClickBehaviour: 'selectWord' | 'goToLocation' | 'openLocationToSide',
-		experimental: { reusePriorSearchConfiguration: boolean }
+		reusePriorSearchConfiguration: boolean,
+		defaultNumberOfContextLines: number | null,
+		experimental: {}
 	};
 	sortOrder: SearchSortOrder;
 }
@@ -420,7 +423,8 @@ export enum SearchErrorCode {
 	globParseError,
 	invalidLiteral,
 	rgProcessError,
-	other
+	other,
+	canceled
 }
 
 export class SearchError extends Error {
@@ -429,7 +433,13 @@ export class SearchError extends Error {
 	}
 }
 
-export function deserializeSearchError(errorMsg: string): SearchError {
+export function deserializeSearchError(error: Error): SearchError {
+	const errorMsg = error.message;
+
+	if (isPromiseCanceledError(error)) {
+		return new SearchError(errorMsg, SearchErrorCode.canceled);
+	}
+
 	try {
 		const details = JSON.parse(errorMsg);
 		return new SearchError(details.message, details.code);
@@ -467,7 +477,7 @@ export interface IRawFileMatch {
 	 *
 	 * If not given, the search algorithm should use `relativePath`.
 	 */
-	searchPath?: string;
+	searchPath: string | undefined;
 }
 
 export interface ISearchEngine<T> {

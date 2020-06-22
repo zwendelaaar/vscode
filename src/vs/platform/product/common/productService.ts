@@ -11,7 +11,7 @@ export const IProductService = createDecorator<IProductService>('productService'
 
 export interface IProductService extends Readonly<IProductConfiguration> {
 
-	_serviceBrand: undefined;
+	readonly _serviceBrand: undefined;
 
 }
 
@@ -60,6 +60,7 @@ export interface IProductConfiguration {
 
 	readonly extensionTips?: { [id: string]: string; };
 	readonly extensionImportantTips?: { [id: string]: { name: string; pattern: string; isExtensionPack?: boolean }; };
+	readonly configBasedExtensionTips?: { [id: string]: IConfigBasedExtensionTip; };
 	readonly exeBasedExtensionTips?: { [id: string]: IExeBasedExtensionTip; };
 	readonly remoteExtensionTips?: { [remoteName: string]: IRemoteExtensionTip; };
 	readonly extensionKeywords?: { [extension: string]: readonly string[]; };
@@ -101,12 +102,7 @@ export interface IProductConfiguration {
 	readonly checksums?: { [path: string]: string; };
 	readonly checksumFailMoreInfoUrl?: string;
 
-	readonly appCenter?: {
-		readonly 'win32-ia32': string;
-		readonly 'win32-x64': string;
-		readonly 'linux-x64': string;
-		readonly 'darwin': string;
-	};
+	readonly appCenter?: IAppCenterConfiguration;
 
 	readonly portable?: string;
 
@@ -117,6 +113,19 @@ export interface IProductConfiguration {
 	readonly linkProtectionTrustedDomains?: readonly string[];
 
 	readonly 'configurationSync.store'?: ConfigurationSyncStore;
+}
+
+export interface IAppCenterConfiguration {
+	readonly 'win32-ia32': string;
+	readonly 'win32-x64': string;
+	readonly 'linux-x64': string;
+	readonly 'darwin': string;
+}
+
+export interface IConfigBasedExtensionTip {
+	configPath: string;
+	configName: string;
+	recommendations: IStringDictionary<{ name: string, remotes?: string[], important?: boolean, isExtensionPack?: boolean }>;
 }
 
 export interface IExeBasedExtensionTip {

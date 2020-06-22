@@ -48,7 +48,7 @@ import { once } from 'vs/base/common/functional';
 import { IEditorGroup } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { getCodeEditor } from 'vs/editor/browser/editorBrowser';
 import { withNullAsUndefined } from 'vs/base/common/types';
-import { stripCodicons } from 'vs/base/common/codicons';
+import { Codicon, stripCodicons } from 'vs/base/common/codicons';
 
 interface IAnythingQuickPickItem extends IPickerQuickAccessItem, IQuickPickItemWithResource { }
 
@@ -491,22 +491,34 @@ export class AnythingQuickAccessProvider extends PickerQuickAccessProvider<IAnyt
 		// Use absolute path result as only results if present
 		let fileMatches: Array<URI>;
 		if (absolutePathResult) {
-			fileMatches = [absolutePathResult];
+			if (excludes.has(absolutePathResult)) {
+				return []; // excluded
+			}
+
+			// Create a single result pick and make sure to apply full
+			// highlights to ensure the pick is displayed. Since a
+			// ~ might have been used for searching, our fuzzy scorer
+			// may otherwise not properly respect the pick as a result
+			const absolutePathPick = this.createAnythingPick(absolutePathResult, this.configuration);
+			absolutePathPick.highlights = {
+				label: [{ start: 0, end: absolutePathPick.label.length }],
+				description: absolutePathPick.description ? [{ start: 0, end: absolutePathPick.description.length }] : undefined
+			};
+
+			return [absolutePathPick];
 		}
 
 		// Otherwise run the file search (with a delayer if cache is not ready yet)
-		else {
-			if (this.pickState.fileQueryCache?.isLoaded) {
-				fileMatches = await this.doFileSearch(query, token);
-			} else {
-				fileMatches = await this.fileQueryDelayer.trigger(async () => {
-					if (token.isCancellationRequested) {
-						return [];
-					}
+		if (this.pickState.fileQueryCache?.isLoaded) {
+			fileMatches = await this.doFileSearch(query, token);
+		} else {
+			fileMatches = await this.fileQueryDelayer.trigger(async () => {
+				if (token.isCancellationRequested) {
+					return [];
+				}
 
-					return this.doFileSearch(query, token);
-				});
-			}
+				return this.doFileSearch(query, token);
+			});
 		}
 
 		if (token.isCancellationRequested) {
@@ -868,14 +880,16 @@ export class AnythingQuickAccessProvider extends PickerQuickAccessProvider<IAnyt
 
 				// Open to side / below
 				buttons.push({
-					iconClass: openSideBySideDirection === 'right' ? 'codicon-split-horizontal' : 'codicon-split-vertical',
-					tooltip: openSideBySideDirection === 'right' ? localize('openToSide', "Open to the Side") : localize('openToBottom', "Open to the Bottom")
+					iconClass: openSideBySideDirection === 'right' ? Codicon.splitHorizontal.classNames : Codicon.splitVertical.classNames,
+					tooltip: openSideBySideDirection === 'right' ?
+						localize({ key: 'openToSide', comment: ['Open this file in a split editor on the left/right side'] }, "Open to the Side") :
+						localize({ key: 'openToBottom', comment: ['Open this file in a split editor on the bottom'] }, "Open to the Bottom")
 				});
 
 				// Remove from History
 				if (isEditorHistoryEntry) {
 					buttons.push({
-						iconClass: isDirty ? 'dirty-anything codicon-circle-filled' : 'codicon-close',
+						iconClass: isDirty ? ('dirty-anything ' + Codicon.circleFilled.classNames) : Codicon.close.classNames,
 						tooltip: localize('closeEditor', "Remove from Recently Opened"),
 						alwaysVisible: isDirty
 					});

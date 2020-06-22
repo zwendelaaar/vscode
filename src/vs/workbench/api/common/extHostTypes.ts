@@ -2652,6 +2652,17 @@ export enum DebugConsoleMode {
 	MergeWithParent = 1
 }
 
+export enum DebugConfigurationProviderTriggerKind {
+	/**
+	 *	`DebugConfigurationProvider.provideDebugConfigurations` is called to provide the initial debug configurations for a newly created launch.json.
+	 */
+	Initial = 1,
+	/**
+	 * `DebugConfigurationProvider.provideDebugConfigurations` is called to provide dynamically generated debug configurations when the user asks for them through the UI (e.g. via the "Select and Start Debugging" command).
+	 */
+	Dynamic = 2
+}
+
 //#endregion
 
 @es5ClassCompat
@@ -2731,3 +2742,41 @@ export class TimelineItem implements vscode.TimelineItem {
 }
 
 //#endregion Timeline
+
+//#region ExtensionContext
+
+export enum ExtensionMode {
+	/**
+	 * The extension is installed normally (for example, from the marketplace
+	 * or VSIX) in VS Code.
+	 */
+	Production = 1,
+
+	/**
+	 * The extension is running from an `--extensionDevelopmentPath` provided
+	 * when launching VS Code.
+	 */
+	Development = 2,
+
+	/**
+	 * The extension is running from an `--extensionDevelopmentPath` and
+	 * the extension host is running unit tests.
+	 */
+	Test = 3,
+}
+
+//#endregion ExtensionContext
+
+
+//#region Authentication
+export class AuthenticationSession implements vscode.AuthenticationSession2 {
+	constructor(public id: string, public accessToken: string, public account: { displayName: string, id: string }, public scopes: string[]) { }
+}
+
+//#endregion Authentication
+export enum StandardTokenType {
+	Other = 0,
+	Comment = 1,
+	String = 2,
+	RegEx = 4
+}

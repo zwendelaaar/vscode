@@ -4,9 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { window, tasks, Disposable, TaskDefinition, Task, EventEmitter, CustomExecution, Pseudoterminal, TaskScope, commands, Task2 } from 'vscode';
+import { window, tasks, Disposable, TaskDefinition, Task, EventEmitter, CustomExecution, Pseudoterminal, TaskScope, commands, Task2, env, UIKind, ShellExecution } from 'vscode';
 
-suite('vscode API - tasks', () => {
+// Disable tasks tests:
+// - Web https://github.com/microsoft/vscode/issues/90528
+((env.uiKind === UIKind.Web) ? suite.skip : suite)('vscode API - tasks', () => {
 
 	suite('Tasks', () => {
 		let disposables: Disposable[] = [];
@@ -116,7 +118,7 @@ suite('vscode API - tasks', () => {
 								writeEmitter.fire('exiting');
 								closeEmitter.fire();
 							},
-							close: () => {}
+							close: () => { }
 						};
 						return Promise.resolve(pty);
 					});
@@ -134,6 +136,38 @@ suite('vscode API - tasks', () => {
 				}
 			}));
 			commands.executeCommand('workbench.action.tasks.runTask', `${taskType}: ${taskName}`);
+		});
+
+		test('Execution from event is equal to original', () => {
+			return new Promise(async (resolve, reject) => {
+				const task = new Task({ type: 'testTask' }, TaskScope.Workspace, 'echo', 'testTask', new ShellExecution('echo', ['hello test']));
+				const taskExecution = await tasks.executeTask(task);
+				let equalCount = 2;
+				function checkEqualCount() {
+					equalCount--;
+					if (equalCount === 0) {
+						resolve();
+					} else if (equalCount < 0) {
+						reject('Unexpected extra task events.');
+					}
+				}
+
+				tasks.onDidStartTaskProcess(e => {
+					if (e.execution === taskExecution) {
+						checkEqualCount();
+					} else {
+						reject('Unexpected task execution value in start process.');
+					}
+				});
+
+				tasks.onDidEndTaskProcess(e => {
+					if (e.execution === taskExecution) {
+						checkEqualCount();
+					} else {
+						reject('Unexpected task execution value in end process.');
+					}
+				});
+			});
 		});
 	});
 });

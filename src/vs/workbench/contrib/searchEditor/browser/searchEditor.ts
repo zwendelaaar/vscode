@@ -50,6 +50,7 @@ import { serializeSearchResultForEditor } from 'vs/workbench/contrib/searchEdito
 import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IPatternInfo, ISearchConfigurationProperties, ITextQuery } from 'vs/workbench/services/search/common/search';
+import { searchDetailsIcon } from 'vs/workbench/contrib/search/browser/searchIcons';
 
 const RESULT_LINE_REGEX = /^(\s+)(\d+)(:| )(\s+)(.*)$/;
 const FILE_LINE_REGEX = /^(\S.*):$/;
@@ -89,7 +90,7 @@ export class SearchEditor extends BaseTextEditor {
 		@IModelService private readonly modelService: IModelService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 		@ILabelService private readonly labelService: ILabelService,
-		@IInstantiationService readonly instantiationService: IInstantiationService,
+		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IContextKeyService readonly contextKeyService: IContextKeyService,
@@ -135,7 +136,7 @@ export class SearchEditor extends BaseTextEditor {
 		this.includesExcludesContainer = DOM.append(this.queryEditorContainer, DOM.$('.includes-excludes'));
 
 		// // Toggle query details button
-		this.toggleQueryDetailsButton = DOM.append(this.includesExcludesContainer, DOM.$('.expand.codicon.codicon-ellipsis', { tabindex: 0, role: 'button', title: localize('moreSearch', "Toggle Search Details") }));
+		this.toggleQueryDetailsButton = DOM.append(this.includesExcludesContainer, DOM.$('.expand' + searchDetailsIcon.cssSelector, { tabindex: 0, role: 'button', title: localize('moreSearch', "Toggle Search Details") }));
 		this._register(DOM.addDisposableListener(this.toggleQueryDetailsButton, DOM.EventType.CLICK, e => {
 			DOM.EventHelper.stop(e);
 			this.toggleIncludesExcludes();
@@ -247,10 +248,7 @@ export class SearchEditor extends BaseTextEditor {
 	}
 
 	focusSearchInput() {
-		const viewState = this.loadViewState();
-		if (viewState && viewState.focused === 'editor') {
-			this.queryEditorWidget.searchInput.focus();
-		}
+		this.queryEditorWidget.searchInput.focus();
 	}
 
 	focusNextInput() {
@@ -412,7 +410,7 @@ export class SearchEditor extends BaseTextEditor {
 		this.searchResultEditor.focus();
 	}
 
-	async triggerSearch(_options?: { resetCursor?: boolean; delay?: number; }) {
+	async triggerSearch(_options?: { resetCursor?: boolean; delay?: number; focusResults?: boolean }) {
 		const options = { resetCursor: true, delay: 0, ..._options };
 
 		if (!this.pauseSearching) {
@@ -422,6 +420,9 @@ export class SearchEditor extends BaseTextEditor {
 				if (options.resetCursor) {
 					this.searchResultEditor.setPosition(new Position(1, 1));
 					this.searchResultEditor.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
+				}
+				if (options.focusResults) {
+					this.searchResultEditor.focus();
 				}
 			}, options.delay);
 		}

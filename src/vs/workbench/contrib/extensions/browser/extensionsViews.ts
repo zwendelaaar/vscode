@@ -23,7 +23,6 @@ import { IExtensionService } from 'vs/workbench/services/extensions/common/exten
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { attachBadgeStyler } from 'vs/platform/theme/common/styler';
 import { IViewletViewOptions } from 'vs/workbench/browser/parts/views/viewsViewlet';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { CountBadge } from 'vs/base/browser/ui/countBadge/countBadge';
 import { Separator } from 'vs/base/browser/ui/actionbar/actionbar';
@@ -100,7 +99,6 @@ export class ExtensionsListView extends ViewPane {
 		@IThemeService themeService: IThemeService,
 		@IExtensionService private readonly extensionService: IExtensionService,
 		@IExtensionsWorkbenchService protected extensionsWorkbenchService: IExtensionsWorkbenchService,
-		@IEditorService private readonly editorService: IEditorService,
 		@IExtensionRecommendationsService protected tipsService: IExtensionRecommendationsService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IConfigurationService configurationService: IConfigurationService,
@@ -137,13 +135,15 @@ export class ExtensionsListView extends ViewPane {
 		const extensionsViewState = new ExtensionsViewState();
 		const renderer = this.instantiationService.createInstance(Renderer, extensionsViewState);
 		this.list = this.instantiationService.createInstance<typeof WorkbenchPagedList, WorkbenchPagedList<IExtension>>(WorkbenchPagedList, 'Extensions', extensionsList, delegate, [renderer], {
-			ariaLabel: localize('extensions', "Extensions"),
 			multipleSelectionSupport: false,
 			setRowLineHeight: false,
 			horizontalScrolling: false,
 			accessibilityProvider: <IListAccessibilityProvider<IExtension | null>>{
 				getAriaLabel(extension: IExtension | null): string {
 					return extension ? localize('extension-arialabel', "{0}. Press enter for extension details.", extension.displayName) : '';
+				},
+				getWidgetAriaLabel(): string {
+					return localize('extensions', "Extensions");
 				}
 			},
 			overrideStyles: {
@@ -155,15 +155,10 @@ export class ExtensionsListView extends ViewPane {
 		this._register(this.list);
 		this._register(extensionsViewState);
 
-		const resourceNavigator = this._register(new ListResourceNavigator(this.list, { openOnFocus: false, openOnSelection: true, openOnSingleClick: true }));
-		this._register(Event.debounce(Event.filter(resourceNavigator.onDidOpenResource, e => e.element !== null), (last, event) => event, 75, true)(options => {
+		const resourceNavigator = this._register(new ListResourceNavigator(this.list, { openOnSingleClick: true }));
+		this._register(Event.debounce(Event.filter(resourceNavigator.onDidOpen, e => e.element !== null), (_, event) => event, 75, true)(options => {
 			this.openExtension(this.list!.model.get(options.element!), { sideByside: options.sideBySide, ...options.editorOptions });
 		}));
-
-		this._register(Event.chain(this.list.onPin)
-			.map(e => e.elements[0])
-			.filter(e => !!e)
-			.on(this.pin, this));
 
 		this.bodyTemplate = {
 			extensionsList,
@@ -553,12 +548,13 @@ export class ExtensionsListView extends ViewPane {
 			.then(result => result.filter(e => e.type === ExtensionType.User))
 			.then(local => {
 				const fileBasedRecommendations = this.tipsService.getFileBasedRecommendations();
+				const configBasedRecommendationsPromise = this.tipsService.getConfigBasedRecommendations();
 				const othersPromise = this.tipsService.getOtherRecommendations();
 				const workspacePromise = this.tipsService.getWorkspaceRecommendations();
 
-				return Promise.all([othersPromise, workspacePromise])
-					.then(([others, workspaceRecommendations]) => {
-						const names = this.getTrimmedRecommendations(local, value, fileBasedRecommendations, others, workspaceRecommendations);
+				return Promise.all([othersPromise, workspacePromise, configBasedRecommendationsPromise])
+					.then(([others, workspaceRecommendations, configBasedRecommendations]) => {
+						const names = this.getTrimmedRecommendations(local, value, fileBasedRecommendations, configBasedRecommendations, others, workspaceRecommendations);
 						const recommendationsWithReason = this.tipsService.getAllRecommendationsWithReason();
 						/* __GDPR__
 							"extensionAllRecommendations:open" : {
@@ -608,15 +604,17 @@ export class ExtensionsListView extends ViewPane {
 			.then(result => result.filter(e => e.type === ExtensionType.User))
 			.then(local => {
 				let fileBasedRecommendations = this.tipsService.getFileBasedRecommendations();
+				const configBasedRecommendationsPromise = this.tipsService.getConfigBasedRecommendations();
 				const othersPromise = this.tipsService.getOtherRecommendations();
 				const workspacePromise = this.tipsService.getWorkspaceRecommendations();
 
-				return Promise.all([othersPromise, workspacePromise])
-					.then(([others, workspaceRecommendations]) => {
+				return Promise.all([othersPromise, workspacePromise, configBasedRecommendationsPromise])
+					.then(([others, workspaceRecommendations, configBasedRecommendations]) => {
+						configBasedRecommendations = configBasedRecommendations.filter(x => workspaceRecommendations.every(({ extensionId }) => x.extensionId !== extensionId));
 						fileBasedRecommendations = fileBasedRecommendations.filter(x => workspaceRecommendations.every(({ extensionId }) => x.extensionId !== extensionId));
 						others = others.filter(x => workspaceRecommendations.every(({ extensionId }) => x.extensionId !== extensionId));
 
-						const names = this.getTrimmedRecommendations(local, value, fileBasedRecommendations, others, []);
+						const names = this.getTrimmedRecommendations(local, value, fileBasedRecommendations, configBasedRecommendations, others, []);
 						const recommendationsWithReason = this.tipsService.getAllRecommendationsWithReason();
 
 						/* __GDPR__
@@ -649,28 +647,36 @@ export class ExtensionsListView extends ViewPane {
 	}
 
 	// Given all recommendations, trims and returns recommendations in the relevant order after filtering out installed extensions
-	private getTrimmedRecommendations(installedExtensions: IExtension[], value: string, fileBasedRecommendations: IExtensionRecommendation[], otherRecommendations: IExtensionRecommendation[], workspaceRecommendations: IExtensionRecommendation[]): string[] {
-		const totalCount = 8;
+	private getTrimmedRecommendations(installedExtensions: IExtension[], value: string, fileBasedRecommendations: IExtensionRecommendation[], configBasedRecommendations: IExtensionRecommendation[], otherRecommendations: IExtensionRecommendation[], workspaceRecommendations: IExtensionRecommendation[]): string[] {
+		const totalCount = 10;
 		workspaceRecommendations = workspaceRecommendations
 			.filter(recommendation => {
 				return !this.isRecommendationInstalled(recommendation, installedExtensions)
 					&& recommendation.extensionId.toLowerCase().indexOf(value) > -1;
 			});
+		configBasedRecommendations = configBasedRecommendations
+			.filter(recommendation => {
+				return !this.isRecommendationInstalled(recommendation, installedExtensions)
+					&& workspaceRecommendations.every(workspaceRecommendation => workspaceRecommendation.extensionId !== recommendation.extensionId)
+					&& recommendation.extensionId.toLowerCase().indexOf(value) > -1;
+			});
 		fileBasedRecommendations = fileBasedRecommendations.filter(recommendation => {
 			return !this.isRecommendationInstalled(recommendation, installedExtensions)
 				&& workspaceRecommendations.every(workspaceRecommendation => workspaceRecommendation.extensionId !== recommendation.extensionId)
+				&& configBasedRecommendations.every(configBasedRecommendation => configBasedRecommendation.extensionId !== recommendation.extensionId)
 				&& recommendation.extensionId.toLowerCase().indexOf(value) > -1;
 		});
 		otherRecommendations = otherRecommendations.filter(recommendation => {
 			return !this.isRecommendationInstalled(recommendation, installedExtensions)
 				&& fileBasedRecommendations.every(fileBasedRecommendation => fileBasedRecommendation.extensionId !== recommendation.extensionId)
 				&& workspaceRecommendations.every(workspaceRecommendation => workspaceRecommendation.extensionId !== recommendation.extensionId)
+				&& configBasedRecommendations.every(configBasedRecommendation => configBasedRecommendation.extensionId !== recommendation.extensionId)
 				&& recommendation.extensionId.toLowerCase().indexOf(value) > -1;
 		});
 
 		const otherCount = Math.min(2, otherRecommendations.length);
-		const fileBasedCount = Math.min(fileBasedRecommendations.length, totalCount - workspaceRecommendations.length - otherCount);
-		const recommendations = workspaceRecommendations;
+		const fileBasedCount = Math.min(fileBasedRecommendations.length, totalCount - workspaceRecommendations.length - configBasedRecommendations.length - otherCount);
+		const recommendations = [...workspaceRecommendations, ...configBasedRecommendations];
 		recommendations.push(...fileBasedRecommendations.splice(0, fileBasedCount));
 		recommendations.push(...otherRecommendations.splice(0, otherCount));
 
@@ -757,14 +763,6 @@ export class ExtensionsListView extends ViewPane {
 	private openExtension(extension: IExtension, options: { sideByside?: boolean, preserveFocus?: boolean, pinned?: boolean }): void {
 		extension = this.extensionsWorkbenchService.local.filter(e => areSameExtensions(e.identifier, extension.identifier))[0] || extension;
 		this.extensionsWorkbenchService.open(extension, options).then(undefined, err => this.onError(err));
-	}
-
-	private pin(): void {
-		const activeEditorPane = this.editorService.activeEditorPane;
-		if (activeEditorPane) {
-			activeEditorPane.group.pinEditor(activeEditorPane.input);
-			activeEditorPane.focus();
-		}
 	}
 
 	private onError(err: any): void {
@@ -879,7 +877,6 @@ export class ServerExtensionsView extends ExtensionsListView {
 		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IExtensionService extensionService: IExtensionService,
-		@IEditorService editorService: IEditorService,
 		@IExtensionRecommendationsService tipsService: IExtensionRecommendationsService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IConfigurationService configurationService: IConfigurationService,
@@ -895,7 +892,7 @@ export class ServerExtensionsView extends ExtensionsListView {
 		@IPreferencesService preferencesService: IPreferencesService,
 	) {
 		options.server = server;
-		super(options, notificationService, keybindingService, contextMenuService, instantiationService, themeService, extensionService, extensionsWorkbenchService, editorService, tipsService, telemetryService, configurationService, contextService, experimentService, extensionManagementServerService, productService, contextKeyService, viewDescriptorService, menuService, openerService, preferencesService);
+		super(options, notificationService, keybindingService, contextMenuService, instantiationService, themeService, extensionService, extensionsWorkbenchService, tipsService, telemetryService, configurationService, contextService, experimentService, extensionManagementServerService, productService, contextKeyService, viewDescriptorService, menuService, openerService, preferencesService);
 		this._register(onDidChangeTitle(title => this.updateTitle(title)));
 	}
 

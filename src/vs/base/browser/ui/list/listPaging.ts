@@ -6,8 +6,8 @@
 import 'vs/css!./list';
 import { IDisposable, Disposable } from 'vs/base/common/lifecycle';
 import { range } from 'vs/base/common/arrays';
-import { IListVirtualDelegate, IListRenderer, IListEvent, IListContextMenuEvent } from './list';
-import { List, IListStyles, IListOptions, IListAccessibilityProvider } from './listWidget';
+import { IListVirtualDelegate, IListRenderer, IListEvent, IListContextMenuEvent, IListMouseEvent } from './list';
+import { List, IListStyles, IListOptions, IListAccessibilityProvider, IListOptionsUpdate } from './listWidget';
 import { IPagedModel } from 'vs/base/common/paging';
 import { Event } from 'vs/base/common/event';
 import { CancellationTokenSource } from 'vs/base/common/cancellation';
@@ -78,6 +78,10 @@ class PagedAccessibilityProvider<T> implements IListAccessibilityProvider<number
 		private accessibilityProvider: IListAccessibilityProvider<T>
 	) { }
 
+	getWidgetAriaLabel(): string {
+		return this.accessibilityProvider.getWidgetAriaLabel();
+	}
+
 	getAriaLabel(index: number): string | null {
 		const model = this.modelProvider();
 
@@ -132,6 +136,10 @@ export class PagedList<T> implements IDisposable {
 		this.list = new List(user, container, virtualDelegate, pagedRenderers, fromPagedListOptions(modelProvider, options));
 	}
 
+	updateOptions(options: IListOptionsUpdate) {
+		this.list.updateOptions(options);
+	}
+
 	getHTMLElement(): HTMLElement {
 		return this.list.getHTMLElement();
 	}
@@ -160,20 +168,16 @@ export class PagedList<T> implements IDisposable {
 		return this.list.onDidDispose;
 	}
 
-	get onDidChangeFocus(): Event<IListEvent<T>> {
-		return Event.map(this.list.onDidChangeFocus, ({ elements, indexes }) => ({ elements: elements.map(e => this._model.get(e)), indexes }));
+	get onMouseDblClick(): Event<IListMouseEvent<T>> {
+		return Event.map(this.list.onMouseDblClick, ({ element, index, browserEvent }) => ({ element: element === undefined ? undefined : this._model.get(element), index, browserEvent }));
 	}
 
-	get onDidOpen(): Event<IListEvent<T>> {
-		return Event.map(this.list.onDidOpen, ({ elements, indexes, browserEvent }) => ({ elements: elements.map(e => this._model.get(e)), indexes, browserEvent }));
+	get onDidChangeFocus(): Event<IListEvent<T>> {
+		return Event.map(this.list.onDidChangeFocus, ({ elements, indexes, browserEvent }) => ({ elements: elements.map(e => this._model.get(e)), indexes, browserEvent }));
 	}
 
 	get onDidChangeSelection(): Event<IListEvent<T>> {
-		return Event.map(this.list.onDidChangeSelection, ({ elements, indexes }) => ({ elements: elements.map(e => this._model.get(e)), indexes }));
-	}
-
-	get onPin(): Event<IListEvent<T>> {
-		return Event.map(this.list.onDidPin, ({ elements, indexes }) => ({ elements: elements.map(e => this._model.get(e)), indexes }));
+		return Event.map(this.list.onDidChangeSelection, ({ elements, indexes, browserEvent }) => ({ elements: elements.map(e => this._model.get(e)), indexes, browserEvent }));
 	}
 
 	get onContextMenu(): Event<IListContextMenuEvent<T>> {
@@ -207,10 +211,6 @@ export class PagedList<T> implements IDisposable {
 
 	set scrollLeft(scrollLeft: number) {
 		this.list.scrollLeft = scrollLeft;
-	}
-
-	open(indexes: number[], browserEvent?: UIEvent): void {
-		this.list.open(indexes, browserEvent);
 	}
 
 	setFocus(indexes: number[]): void {

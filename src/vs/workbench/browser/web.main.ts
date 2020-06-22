@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mark } from 'vs/base/common/performance';
-import { domContentLoaded, addDisposableListener, EventType, addClass, EventHelper } from 'vs/base/browser/dom';
+import { domContentLoaded, addDisposableListener, EventType, EventHelper } from 'vs/base/browser/dom';
 import { ServiceCollection } from 'vs/platform/instantiation/common/serviceCollection';
 import { ILogService, ConsoleLogService, MultiplexLogService } from 'vs/platform/log/common/log';
 import { ConsoleLogInAutomationService } from 'vs/platform/log/browser/log';
@@ -39,7 +39,6 @@ import { BACKUPS } from 'vs/platform/environment/common/environment';
 import { joinPath } from 'vs/base/common/resources';
 import { BrowserStorageService } from 'vs/platform/storage/browser/storageService';
 import { IStorageService } from 'vs/platform/storage/common/storage';
-import { getThemeTypeSelector, DARK, HIGH_CONTRAST, LIGHT } from 'vs/platform/theme/common/themeService';
 import { registerWindowDriver } from 'vs/platform/driver/browser/driver';
 import { BufferLogService } from 'vs/platform/log/common/bufferLog';
 import { FileLogService } from 'vs/platform/log/common/fileLogService';
@@ -67,9 +66,6 @@ class BrowserMain extends Disposable {
 
 		await domContentLoaded();
 		mark('willStartWorkbench');
-
-		// Base Theme
-		this.restoreBaseTheme();
 
 		// Create Workbench
 		const workbench = new Workbench(
@@ -125,7 +121,6 @@ class BrowserMain extends Disposable {
 		}));
 		this._register(workbench.onWillShutdown(() => {
 			storageService.close();
-			this.saveBaseTheme();
 		}));
 		this._register(workbench.onShutdown(() => this.dispose()));
 
@@ -139,21 +134,6 @@ class BrowserMain extends Disposable {
 				}
 			}));
 		});
-	}
-
-	private restoreBaseTheme(): void {
-		addClass(this.domElement, window.localStorage.getItem('vscode.baseTheme') || getThemeTypeSelector(LIGHT) /* Fallback to a light theme by default on web */);
-	}
-
-	private saveBaseTheme(): void {
-		const classes = this.domElement.className;
-		const baseThemes = [DARK, LIGHT, HIGH_CONTRAST].map(baseTheme => getThemeTypeSelector(baseTheme));
-		for (const baseTheme of baseThemes) {
-			if (classes.indexOf(baseTheme) >= 0) {
-				window.localStorage.setItem('vscode.baseTheme', baseTheme);
-				break;
-			}
-		}
 	}
 
 	private async initServices(): Promise<{ serviceCollection: ServiceCollection, logService: ILogService, storageService: BrowserStorageService }> {
@@ -180,10 +160,7 @@ class BrowserMain extends Disposable {
 		serviceCollection.set(IWorkbenchEnvironmentService, environmentService);
 
 		// Product
-		const productService = {
-			_serviceBrand: undefined,
-			...product
-		};
+		const productService: IProductService = { _serviceBrand: undefined, ...product };
 		serviceCollection.set(IProductService, productService);
 
 		// Remote
@@ -266,7 +243,7 @@ class BrowserMain extends Disposable {
 			if (!this.configuration.userDataProvider) {
 				const remoteUserDataUri = this.getRemoteUserDataUri();
 				if (remoteUserDataUri) {
-					this.configuration.userDataProvider = this._register(new FileUserDataProvider(remoteUserDataUri, joinPath(remoteUserDataUri, BACKUPS), remoteFileSystemProvider, environmentService));
+					this.configuration.userDataProvider = this._register(new FileUserDataProvider(remoteUserDataUri, joinPath(remoteUserDataUri, BACKUPS), remoteFileSystemProvider, environmentService, logService));
 				}
 			}
 		}
