@@ -12,7 +12,8 @@ import API from '../utils/api';
 import { nulToken } from '../utils/cancellation';
 import { applyCodeAction } from '../utils/codeAction';
 import { Command, CommandManager } from '../utils/commandManager';
-import { ConfigurationDependentRegistration } from '../utils/dependentRegistration';
+import { conditionalRegistration, requireConfiguration } from '../utils/dependentRegistration';
+import { parseKindModifier } from '../utils/modifiers';
 import * as Previewer from '../utils/previewer';
 import { snippetForFunctionCall } from '../utils/snippetForFunctionCall';
 import { TelemetryReporter } from '../utils/telemetry';
@@ -90,8 +91,8 @@ class MyCompletionItem extends vscode.CompletionItem {
 		}
 
 		if (tsEntry.kindModifiers) {
-			const kindModifiers = tsEntry.kindModifiers.split(/,|\s+/g);
-			if (kindModifiers.includes(PConst.KindModifiers.optional)) {
+			const kindModifiers = parseKindModifier(tsEntry.kindModifiers);
+			if (kindModifiers.has(PConst.KindModifiers.optional)) {
 				if (!this.insertText) {
 					this.insertText = this.label;
 				}
@@ -101,14 +102,17 @@ class MyCompletionItem extends vscode.CompletionItem {
 				}
 				this.label += '?';
 			}
+			if (kindModifiers.has(PConst.KindModifiers.depreacted)) {
+				this.tags = [vscode.CompletionItemTag.Deprecated];
+			}
 
-			if (kindModifiers.includes(PConst.KindModifiers.color)) {
+			if (kindModifiers.has(PConst.KindModifiers.color)) {
 				this.kind = vscode.CompletionItemKind.Color;
 			}
 
 			if (tsEntry.kind === PConst.Kind.script) {
 				for (const extModifier of PConst.KindModifiers.fileExtensionKindModifiers) {
-					if (kindModifiers.includes(extModifier)) {
+					if (kindModifiers.has(extModifier)) {
 						if (tsEntry.name.toLowerCase().endsWith(extModifier)) {
 							this.detail = tsEntry.name;
 						} else {
@@ -800,8 +804,11 @@ export function register(
 	telemetryReporter: TelemetryReporter,
 	onCompletionAccepted: (item: vscode.CompletionItem) => void
 ) {
-	return new ConfigurationDependentRegistration(modeId, 'suggest.enabled', () =>
-		vscode.languages.registerCompletionItemProvider(selector,
+	return conditionalRegistration([
+		requireConfiguration(modeId, 'suggest.enabled'),
+	], () => {
+		return vscode.languages.registerCompletionItemProvider(selector,
 			new TypeScriptCompletionItemProvider(client, modeId, typingsStatus, fileConfigurationManager, commandManager, telemetryReporter, onCompletionAccepted),
-			...TypeScriptCompletionItemProvider.triggerCharacters));
+			...TypeScriptCompletionItemProvider.triggerCharacters);
+	});
 }

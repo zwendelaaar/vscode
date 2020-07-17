@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { hide, IDimension, show, toggleClass } from 'vs/base/browser/dom';
+import { hide, IDimension, show, toggleClass, addClass, removeClass } from 'vs/base/browser/dom';
 import { raceCancellation } from 'vs/base/common/async';
 import { CancellationTokenSource } from 'vs/base/common/cancellation';
 import { renderCodicons } from 'vs/base/common/codicons';
@@ -57,7 +57,7 @@ export class StatefullMarkdownCell extends Disposable {
 
 		this._register(getResizesObserver(this.markdownContainer, undefined, () => {
 			if (viewCell.editState === CellEditState.Preview) {
-				this.viewCell.totalHeight = templateData.container.clientHeight;
+				this.viewCell.renderedMarkdownHeight = templateData.container.clientHeight;
 			}
 		})).startObserving();
 
@@ -96,11 +96,33 @@ export class StatefullMarkdownCell extends Disposable {
 		this._register(viewCell.onDidChangeLayout((e) => {
 			const layoutInfo = this.editor?.getLayoutInfo();
 			if (e.outerWidth && layoutInfo && layoutInfo.width !== viewCell.layoutInfo.editorWidth) {
-				this.onCellWidthChange();
-			} else if (e.totalHeight) {
+				this.onCellEditorWidthChange();
+			} else if (e.totalHeight || e.outerWidth) {
 				this.relayoutCell();
 			}
 		}));
+
+		this._register(viewCell.onCellDecorationsChanged((e) => {
+			e.added.forEach(options => {
+				if (options.className) {
+					addClass(templateData.container, options.className);
+				}
+			});
+
+			e.removed.forEach(options => {
+				if (options.className) {
+					removeClass(templateData.container, options.className);
+				}
+			});
+		}));
+
+		// apply decorations
+
+		viewCell.getCellDecorations().forEach(options => {
+			if (options.className) {
+				addClass(templateData.container, options.className);
+			}
+		});
 
 		this.viewUpdate();
 	}
@@ -127,6 +149,11 @@ export class StatefullMarkdownCell extends Disposable {
 			this.focusEditorIfNeeded();
 
 			this.bindEditorListeners();
+
+			this.editor.layout({
+				width: this.viewCell.layoutInfo.editorWidth,
+				height: editorHeight
+			});
 		} else {
 			const width = this.viewCell.layoutInfo.editorWidth;
 			const lineNum = this.viewCell.lineCount;
@@ -194,6 +221,7 @@ export class StatefullMarkdownCell extends Disposable {
 		this.renderedEditors.delete(this.viewCell);
 
 		this.markdownContainer.innerHTML = '';
+		this.viewCell.clearHTML();
 		let markdownRenderer = this.viewCell.getMarkdownRenderer();
 		let renderedHTML = this.viewCell.getHTML();
 		if (renderedHTML) {
@@ -202,15 +230,13 @@ export class StatefullMarkdownCell extends Disposable {
 
 		if (this.editor) {
 			// switch from editing mode
-			const clientHeight = this.templateData.container.clientHeight;
-			this.viewCell.totalHeight = clientHeight;
-			this.notebookEditor.layoutNotebookCell(this.viewCell, clientHeight);
+			this.viewCell.renderedMarkdownHeight = this.templateData.container.clientHeight;
+			this.relayoutCell();
 		} else {
 			// first time, readonly mode
 			this.localDisposables.add(markdownRenderer.onDidUpdateRender(() => {
-				const clientHeight = this.templateData.container.clientHeight;
-				this.viewCell.totalHeight = clientHeight;
-				this.notebookEditor.layoutNotebookCell(this.viewCell, clientHeight);
+				this.viewCell.renderedMarkdownHeight = this.templateData.container.clientHeight;
+				this.relayoutCell();
 			}));
 
 			this.localDisposables.add(this.viewCell.textBuffer.onDidChangeContent(() => {
@@ -222,14 +248,13 @@ export class StatefullMarkdownCell extends Disposable {
 				}
 			}));
 
-			const clientHeight = this.templateData.container.clientHeight;
-			this.viewCell.totalHeight = clientHeight;
-			this.notebookEditor.layoutNotebookCell(this.viewCell, clientHeight);
+			this.viewCell.renderedMarkdownHeight = this.templateData.container.clientHeight;
+			this.relayoutCell();
 		}
 	}
 
 	private focusEditorIfNeeded() {
-		if (this.viewCell.focusMode === CellFocusMode.Editor) {
+		if (this.viewCell.focusMode === CellFocusMode.Editor && this.notebookEditor.hasFocus()) {
 			this.editor?.focus();
 		}
 	}
@@ -239,7 +264,7 @@ export class StatefullMarkdownCell extends Disposable {
 		this.templateData.statusBarContainer.style.width = `${dimension.width}px`;
 	}
 
-	private onCellWidthChange(): void {
+	private onCellEditorWidthChange(): void {
 		const realContentHeight = this.editor!.getContentHeight();
 		this.layoutEditor(
 			{
@@ -256,7 +281,7 @@ export class StatefullMarkdownCell extends Disposable {
 		this.notebookEditor.layoutNotebookCell(this.viewCell, this.viewCell.layoutInfo.totalHeight);
 	}
 
-	updateEditorOptions(newValue: IEditorOptions): any {
+	updateEditorOptions(newValue: IEditorOptions): void {
 		this.editorOptions = newValue;
 		if (this.editor) {
 			this.editor.updateOptions(this.editorOptions);
@@ -285,13 +310,13 @@ export class StatefullMarkdownCell extends Disposable {
 			let viewLayout = this.editor!.getLayoutInfo();
 
 			if (e.contentHeightChanged) {
+				this.viewCell.editorHeight = e.contentHeight;
 				this.editor!.layout(
 					{
 						width: viewLayout.width,
 						height: e.contentHeight
 					}
 				);
-				this.viewCell.editorHeight = e.contentHeight;
 			}
 		}));
 

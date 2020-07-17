@@ -23,9 +23,10 @@ import { OutputRenderer } from 'vs/workbench/contrib/notebook/browser/view/outpu
 import { CellLanguageStatusBarItem, TimerRenderer } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellRenderer';
 import { CellViewModel, IModelDecorationsChangeAccessor, NotebookViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
 import { NotebookCellTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellTextModel';
-import { CellKind, IProcessedOutput, IRenderOutput, NotebookCellMetadata, NotebookDocumentMetadata, INotebookKernelInfo, IEditor } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { CellKind, IProcessedOutput, IRenderOutput, NotebookCellMetadata, NotebookDocumentMetadata, INotebookKernelInfo, IEditor, INotebookKernelInfo2 } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { Webview } from 'vs/workbench/contrib/webview/browser/webview';
 import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
+import { IMenu } from 'vs/platform/actions/common/actions';
 
 export const KEYBINDING_CONTEXT_NOTEBOOK_FIND_WIDGET_FOCUSED = new RawContextKey<boolean>('notebookFindWidgetFocused', false);
 
@@ -34,6 +35,7 @@ export const NOTEBOOK_IS_ACTIVE_EDITOR = ContextKeyExpr.equals('activeEditor', '
 
 // Editor keys
 export const NOTEBOOK_EDITOR_FOCUSED = new RawContextKey<boolean>('notebookEditorFocused', false);
+export const NOTEBOOK_CELL_LIST_FOCUSED = new RawContextKey<boolean>('notebookCellListFocused', false);
 export const NOTEBOOK_OUTPUT_FOCUSED = new RawContextKey<boolean>('notebookOutputFocused', false);
 export const NOTEBOOK_EDITOR_EDITABLE = new RawContextKey<boolean>('notebookEditable', true);
 export const NOTEBOOK_EDITOR_RUNNABLE = new RawContextKey<boolean>('notebookRunnable', true);
@@ -117,6 +119,7 @@ export interface ICellViewModel {
 	resolveTextModel(): Promise<ITextModel>;
 	getEvaluatedMetadata(documentMetadata: NotebookDocumentMetadata | undefined): NotebookCellMetadata;
 	getSelectionsStartPosition(): IPosition[] | undefined;
+	getCellDecorations(): INotebookCellDecorationOptions[];
 }
 
 export interface IEditableCellViewModel extends ICellViewModel {
@@ -136,14 +139,26 @@ export interface INotebookEditorContribution {
 	/**
 	 * Store view state.
 	 */
-	saveViewState?(): any;
+	saveViewState?(): unknown;
 	/**
 	 * Restore view state.
 	 */
-	restoreViewState?(state: any): void;
+	restoreViewState?(state: unknown): void;
+}
+
+export interface INotebookCellDecorationOptions {
+	className?: string;
+	outputClassName?: string;
+}
+
+export interface INotebookDeltaDecoration {
+	handle: number;
+	options: INotebookCellDecorationOptions;
 }
 
 export interface INotebookEditor extends IEditor {
+
+	cursorNavigationMode: boolean;
 
 	/**
 	 * Notebook view model attached to the current editor
@@ -157,7 +172,8 @@ export interface INotebookEditor extends IEditor {
 	readonly onDidChangeModel: Event<NotebookTextModel | undefined>;
 	readonly onDidFocusEditorWidget: Event<void>;
 	isNotebookEditor: boolean;
-	activeKernel: INotebookKernelInfo | undefined;
+	activeKernel: INotebookKernelInfo | INotebookKernelInfo2 | undefined;
+	multipleKernelsAvailable: boolean;
 	readonly onDidChangeKernel: Event<void>;
 
 	isDisposed: boolean;
@@ -210,17 +226,17 @@ export interface INotebookEditor extends IEditor {
 	/**
 	 * Move a cell up one spot
 	 */
-	moveCellUp(cell: ICellViewModel): Promise<boolean>;
+	moveCellUp(cell: ICellViewModel): Promise<ICellViewModel | null>;
 
 	/**
 	 * Move a cell down one spot
 	 */
-	moveCellDown(cell: ICellViewModel): Promise<boolean>;
+	moveCellDown(cell: ICellViewModel): Promise<ICellViewModel | null>;
 
 	/**
 	 * Move a cell above or below another cell
 	 */
-	moveCell(cell: ICellViewModel, relativeToCell: ICellViewModel, direction: 'above' | 'below'): Promise<boolean>;
+	moveCell(cell: ICellViewModel, relativeToCell: ICellViewModel, direction: 'above' | 'below'): Promise<ICellViewModel | null>;
 
 	/**
 	 * Focus the container of a cell (the monaco editor inside is not focused).
@@ -260,7 +276,7 @@ export interface INotebookEditor extends IEditor {
 	/**
 	 * Render the output in webview layer
 	 */
-	createInset(cell: ICellViewModel, output: IProcessedOutput, shadowContent: string, offset: number): void;
+	createInset(cell: ICellViewModel, output: IProcessedOutput, shadowContent: string, offset: number): Promise<void>;
 
 	/**
 	 * Remove the output from the webview layer
@@ -270,7 +286,24 @@ export interface INotebookEditor extends IEditor {
 	/**
 	 * Send message to the webview for outputs.
 	 */
-	postMessage(message: any): void;
+	postMessage(forRendererId: string | undefined, message: any): void;
+
+	/**
+	 * Toggle class name on the notebook editor root DOM node.
+	 */
+	toggleClassName(className: string): void;
+
+	/**
+	 * Remove class name on the notebook editor root DOM node.
+	 */
+	addClassName(className: string): void;
+
+	/**
+	 * Remove class name on the notebook editor root DOM node.
+	 */
+	removeClassName(className: string): void;
+
+	deltaCellOutputContainerClassNames(cellId: string, added: string[], removed: string[]): void;
 
 	/**
 	 * Trigger the editor to scroll from scroll event programmatically
@@ -333,7 +366,7 @@ export interface INotebookEditor extends IEditor {
 	 * Change the decorations on cells.
 	 * The notebook is virtualized and this method should be called to create/delete editor decorations safely.
 	 */
-	changeDecorations(callback: (changeAccessor: IModelDecorationsChangeAccessor) => any): any;
+	changeModelDecorations<T>(callback: (changeAccessor: IModelDecorationsChangeAccessor) => T): T | null;
 
 	/**
 	 * An event emitted on a "mouseup".
@@ -356,6 +389,7 @@ export interface INotebookEditor extends IEditor {
 }
 
 export interface INotebookCellList {
+	isDisposed: boolean
 	readonly contextKeyService: IContextKeyService;
 	elementAt(position: number): ICellViewModel | undefined;
 	elementHeight(element: ICellViewModel): number;
@@ -419,7 +453,8 @@ export interface BaseCellRenderTemplate {
 	currentRenderedCell?: ICellViewModel;
 	statusBarContainer: HTMLElement;
 	languageStatusBarItem: CellLanguageStatusBarItem;
-	toJSON: () => any;
+	titleMenu: IMenu;
+	toJSON: () => object;
 }
 
 export interface MarkdownCellRenderTemplate extends BaseCellRenderTemplate {
@@ -440,6 +475,12 @@ export interface CodeCellRenderTemplate extends BaseCellRenderTemplate {
 	editor: ICodeEditor;
 	progressBar: ProgressBar;
 	timer: TimerRenderer;
+	focusIndicatorRight: HTMLElement;
+	focusIndicatorBottom: HTMLElement;
+}
+
+export function isCodeCellRenderTemplate(templateData: BaseCellRenderTemplate): templateData is CodeCellRenderTemplate {
+	return !!(templateData as CodeCellRenderTemplate).runToolbar;
 }
 
 export interface IOutputTransformContribution {
@@ -556,7 +597,7 @@ export function getVisibleCells(cells: CellViewModel[], hiddenRanges: ICellRange
 
 	let start = 0;
 	let hiddenRangeIndex = 0;
-	let result: any[] = [];
+	let result: CellViewModel[] = [];
 
 	while (start < cells.length && hiddenRangeIndex < hiddenRanges.length) {
 		if (start < hiddenRanges[hiddenRangeIndex].start) {

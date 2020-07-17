@@ -22,11 +22,12 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 
 	private static readonly MEMOIZER = createMemoizer();
 
-	private label: URI;
+	private _preferredResource: URI;
+	get preferredResource(): URI { return this._preferredResource; }
 
 	constructor(
 		public readonly resource: URI,
-		preferredLabel: URI | undefined,
+		preferredResource: URI | undefined,
 		@IEditorService protected readonly editorService: IEditorService,
 		@IEditorGroupsService protected readonly editorGroupService: IEditorGroupsService,
 		@ITextFileService protected readonly textFileService: ITextFileService,
@@ -36,7 +37,7 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 	) {
 		super();
 
-		this.label = preferredLabel || resource;
+		this._preferredResource = preferredResource || resource;
 
 		this.registerListeners();
 	}
@@ -50,7 +51,7 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 	}
 
 	private onLabelEvent(scheme: string): void {
-		if (scheme === this.label.scheme) {
+		if (scheme === this._preferredResource.scheme) {
 			this.updateLabel();
 		}
 	}
@@ -64,16 +65,12 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 		this._onDidChangeLabel.fire();
 	}
 
-	setLabel(label: URI): void {
-		if (!extUri.isEqual(label, this.label)) {
-			this.label = label;
+	setPreferredResource(preferredResource: URI): void {
+		if (!extUri.isEqual(preferredResource, this._preferredResource)) {
+			this._preferredResource = preferredResource;
 
 			this.updateLabel();
 		}
-	}
-
-	getLabel(): URI {
-		return this.label;
 	}
 
 	getName(): string {
@@ -82,7 +79,7 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 
 	@AbstractTextResourceEditorInput.MEMOIZER
 	private get basename(): string {
-		return this.labelService.getUriBasenameLabel(this.label);
+		return this.labelService.getUriBasenameLabel(this._preferredResource);
 	}
 
 	getDescription(verbosity: Verbosity = Verbosity.MEDIUM): string | undefined {
@@ -99,17 +96,17 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 
 	@AbstractTextResourceEditorInput.MEMOIZER
 	private get shortDescription(): string {
-		return this.labelService.getUriBasenameLabel(dirname(this.label));
+		return this.labelService.getUriBasenameLabel(dirname(this._preferredResource));
 	}
 
 	@AbstractTextResourceEditorInput.MEMOIZER
 	private get mediumDescription(): string {
-		return this.labelService.getUriLabel(dirname(this.label), { relative: true });
+		return this.labelService.getUriLabel(dirname(this._preferredResource), { relative: true });
 	}
 
 	@AbstractTextResourceEditorInput.MEMOIZER
 	private get longDescription(): string {
-		return this.labelService.getUriLabel(dirname(this.label));
+		return this.labelService.getUriLabel(dirname(this._preferredResource));
 	}
 
 	@AbstractTextResourceEditorInput.MEMOIZER
@@ -119,12 +116,12 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 
 	@AbstractTextResourceEditorInput.MEMOIZER
 	private get mediumTitle(): string {
-		return this.labelService.getUriLabel(this.label, { relative: true });
+		return this.labelService.getUriLabel(this._preferredResource, { relative: true });
 	}
 
 	@AbstractTextResourceEditorInput.MEMOIZER
 	private get longTitle(): string {
-		return this.labelService.getUriLabel(this.label);
+		return this.labelService.getUriLabel(this._preferredResource);
 	}
 
 	getTitle(verbosity: Verbosity): string {
@@ -163,7 +160,7 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 		return false;
 	}
 
-	async save(group: GroupIdentifier, options?: ITextFileSaveOptions): Promise<IEditorInput | undefined> {
+	save(group: GroupIdentifier, options?: ITextFileSaveOptions): Promise<IEditorInput | undefined> {
 		return this.doSave(group, options, false);
 	}
 
@@ -185,7 +182,12 @@ export abstract class AbstractTextResourceEditorInput extends EditorInput {
 			return undefined; // save cancelled
 		}
 
-		return this.editorService.createEditorInput({ resource: target });
+		// If the target is a different resource, return with a new editor input
+		if (!extUri.isEqual(target, this.resource)) {
+			return this.editorService.createEditorInput({ resource: target });
+		}
+
+		return this;
 	}
 
 	async revert(group: GroupIdentifier, options?: IRevertOptions): Promise<void> {

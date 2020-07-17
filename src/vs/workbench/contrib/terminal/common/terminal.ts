@@ -10,8 +10,8 @@ import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { URI } from 'vs/base/common/uri';
 import { OperatingSystem } from 'vs/base/common/platform';
-import { IOpenFileRequest } from 'vs/platform/windows/common/windows';
 import { IEnvironmentVariableInfo } from 'vs/workbench/contrib/terminal/common/environmentVariable';
+import { IExtensionPointDescriptor } from 'vs/workbench/services/extensions/common/extensionsRegistry';
 
 export const TERMINAL_VIEW_ID = 'workbench.panel.terminal';
 
@@ -237,7 +237,7 @@ export interface ITerminalNativeService {
 
 	readonly linuxDistro: LinuxDistro;
 
-	readonly onOpenFileRequest: Event<IOpenFileRequest>;
+	readonly onRequestFocusActiveInstance: Event<void>;
 	readonly onOsResume: Event<void>;
 
 	getWindowsBuildNumber(): number;
@@ -625,3 +625,41 @@ export const DEFAULT_COMMANDS_TO_SKIP_SHELL: string[] = [
 	'workbench.action.quickOpenView',
 	'workbench.action.toggleMaximizedPanel'
 ];
+
+export interface ITerminalContributions {
+	types?: ITerminalTypeContribution[];
+}
+
+export interface ITerminalTypeContribution {
+	title: string;
+	command: string;
+}
+
+export const terminalContributionsDescriptor: IExtensionPointDescriptor = {
+	extensionPoint: 'terminal',
+	defaultExtensionKind: 'workspace',
+	jsonSchema: {
+		description: nls.localize('vscode.extension.contributes.terminal', 'Contributes terminal functionality.'),
+		type: 'object',
+		properties: {
+			types: {
+				type: 'array',
+				description: nls.localize('vscode.extension.contributes.terminal.types', "Defines additional terminal types that the user can create."),
+				items: {
+					type: 'object',
+					required: ['command', 'title'],
+					properties: {
+						command: {
+							description: nls.localize('vscode.extension.contributes.terminal.types.command', "Command to execute when the user creates this type of terminal."),
+							type: 'string',
+						},
+						title: {
+							description: nls.localize('vscode.extension.contributes.terminal.types.title', "Title for this type of terminal."),
+							type: 'string',
+						},
+					},
+				},
+			},
+		},
+	},
+};

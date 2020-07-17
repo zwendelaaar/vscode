@@ -26,6 +26,7 @@ import { clamp } from 'vs/base/common/numbers';
 import { matchesPrefix } from 'vs/base/common/filters';
 import { IDragAndDropData } from 'vs/base/browser/dnd';
 import { alert } from 'vs/base/browser/ui/aria/aria';
+import { IThemable } from 'vs/base/common/styler';
 
 interface ITraitChangeEvent {
 	indexes: number[];
@@ -224,8 +225,24 @@ class TraitSpliceable<T> implements ISpliceable<T> {
 	}
 }
 
-function isInputElement(e: HTMLElement): boolean {
+export function isInputElement(e: HTMLElement): boolean {
 	return e.tagName === 'INPUT' || e.tagName === 'TEXTAREA';
+}
+
+export function isMonacoEditor(e: HTMLElement): boolean {
+	if (DOM.hasClass(e, 'monaco-editor')) {
+		return true;
+	}
+
+	if (DOM.hasClass(e, 'monaco-list')) {
+		return false;
+	}
+
+	if (!e.parentElement) {
+		return false;
+	}
+
+	return isMonacoEditor(e.parentElement);
 }
 
 class KeyboardController<T> implements IDisposable {
@@ -527,6 +544,9 @@ export class MouseController<T> implements IDisposable {
 	private mouseSupport: boolean;
 	private readonly disposables = new DisposableStore();
 
+	private _onPointer = new Emitter<IListMouseEvent<T>>();
+	readonly onPointer: Event<IListMouseEvent<T>> = this._onPointer.event;
+
 	constructor(protected list: List<T>) {
 		this.multipleSelectionSupport = !(list.options.multipleSelectionSupport === false);
 
@@ -544,9 +564,7 @@ export class MouseController<T> implements IDisposable {
 			this.disposables.add(Gesture.addTarget(list.getHTMLElement()));
 		}
 
-		list.onMouseClick(this.onPointer, this, this.disposables);
-		list.onMouseMiddleClick(this.onPointer, this, this.disposables);
-		list.onTap(this.onPointer, this, this.disposables);
+		Event.any(list.onMouseClick, list.onMouseMiddleClick, list.onTap)(this.onViewPointer, this, this.disposables);
 	}
 
 	protected isSelectionSingleChangeEvent(event: IListMouseEvent<any> | IListTouchEvent<any>): boolean {
@@ -570,22 +588,30 @@ export class MouseController<T> implements IDisposable {
 	}
 
 	private onMouseDown(e: IListMouseEvent<T> | IListTouchEvent<T>): void {
+		if (isMonacoEditor(e.browserEvent.target as HTMLElement)) {
+			return;
+		}
+
 		if (document.activeElement !== e.browserEvent.target) {
 			this.list.domFocus();
 		}
 	}
 
 	private onContextMenu(e: IListContextMenuEvent<T>): void {
+		if (isMonacoEditor(e.browserEvent.target as HTMLElement)) {
+			return;
+		}
+
 		const focus = typeof e.index === 'undefined' ? [] : [e.index];
 		this.list.setFocus(focus, e.browserEvent);
 	}
 
-	protected onPointer(e: IListMouseEvent<T>): void {
+	protected onViewPointer(e: IListMouseEvent<T>): void {
 		if (!this.mouseSupport) {
 			return;
 		}
 
-		if (isInputElement(e.browserEvent.target as HTMLElement)) {
+		if (isInputElement(e.browserEvent.target as HTMLElement) || isMonacoEditor(e.browserEvent.target as HTMLElement)) {
 			return;
 		}
 
@@ -614,10 +640,12 @@ export class MouseController<T> implements IDisposable {
 		if (!isMouseRightClick(e.browserEvent)) {
 			this.list.setSelection([focus], e.browserEvent);
 		}
+
+		this._onPointer.fire(e);
 	}
 
 	protected onDoubleClick(e: IListMouseEvent<T>): void {
-		if (isInputElement(e.browserEvent.target as HTMLElement)) {
+		if (isInputElement(e.browserEvent.target as HTMLElement) || isMonacoEditor(e.browserEvent.target as HTMLElement)) {
 			return;
 		}
 
@@ -826,6 +854,7 @@ export interface IListOptions<T> {
 	readonly horizontalScrolling?: boolean;
 	readonly additionalScrollHeight?: number;
 	readonly transformOptimization?: boolean;
+	readonly smoothScrolling?: boolean;
 }
 
 export interface IListStyles {
@@ -1083,7 +1112,7 @@ export interface IListOptionsUpdate extends IListViewOptionsUpdate {
 	readonly automaticKeyboardNavigation?: boolean;
 }
 
-export class List<T> implements ISpliceable<T>, IDisposable {
+export class List<T> implements ISpliceable<T>, IThemable, IDisposable {
 
 	private focus: Trait<T>;
 	private selection: Trait<T>;
@@ -1093,6 +1122,7 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 	private styleController: IStyleController;
 	private typeLabelController?: TypeLabelController<T>;
 	private accessibilityProvider?: IListAccessibilityProvider<T>;
+	private mouseController: MouseController<T>;
 	private _ariaLabel: string = '';
 
 	protected readonly disposables = new DisposableStore();
@@ -1110,6 +1140,7 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 	get onMouseClick(): Event<IListMouseEvent<T>> { return this.view.onMouseClick; }
 	get onMouseDblClick(): Event<IListMouseEvent<T>> { return this.view.onMouseDblClick; }
 	get onMouseMiddleClick(): Event<IListMouseEvent<T>> { return this.view.onMouseMiddleClick; }
+	get onPointer(): Event<IListMouseEvent<T>> { return this.mouseController.onPointer; }
 	get onMouseUp(): Event<IListMouseEvent<T>> { return this.view.onMouseUp; }
 	get onMouseDown(): Event<IListMouseEvent<T>> { return this.view.onMouseDown; }
 	get onMouseOver(): Event<IListMouseEvent<T>> { return this.view.onMouseOver; }
@@ -1228,7 +1259,8 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 			this.disposables.add(this.typeLabelController);
 		}
 
-		this.disposables.add(this.createMouseController(_options));
+		this.mouseController = this.createMouseController(_options);
+		this.disposables.add(this.mouseController);
 
 		this.onDidChangeFocus(this._onFocusChange, this, this.disposables);
 		this.onDidChangeSelection(this._onSelectionChange, this, this.disposables);

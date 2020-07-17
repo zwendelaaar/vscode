@@ -6,45 +6,49 @@
  *--------------------------------------------------------------------------------------------*/
 
 // @ts-check
-/** @typedef {import('../../src/vs/workbench/workbench.web.api').IWorkbenchConstructionOptions} WebConfiguration **/
 
 const http = require('http');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
 const util = require('util');
-const glob = require('glob');
 const opn = require('opn');
 const minimist = require('minimist');
-const webpack = require('webpack');
+const fancyLog = require('fancy-log');
+const ansiColors = require('ansi-colors');
+
+const extensions = require('../../build/lib/extensions');
 
 const APP_ROOT = path.join(__dirname, '..', '..');
-const EXTENSIONS_ROOT = path.join(APP_ROOT, 'extensions');
+const BUILTIN_EXTENSIONS_ROOT = path.join(APP_ROOT, 'extensions');
+const BUILTIN_MARKETPLACE_EXTENSIONS_ROOT = path.join(APP_ROOT, '.build', 'builtInExtensions');
 const WEB_MAIN = path.join(APP_ROOT, 'src', 'vs', 'code', 'browser', 'workbench', 'workbench-dev.html');
 
 const args = minimist(process.argv, {
 	boolean: [
-		'watch',
 		'no-launch',
-		'help'
+		'help',
+		'verbose'
 	],
 	string: [
 		'scheme',
 		'host',
 		'port',
-		'local_port'
+		'local_port',
+		'extension'
 	],
 });
 
 if (args.help) {
 	console.log(
 		'yarn web [options]\n' +
-		' --watch       Watch extensions that require browser specific builds\n' +
-		' --no-launch   Do not open VSCode web in the browser\n' +
-		' --scheme      Protocol (https or http)\n' +
-		' --host        Remote host\n' +
-		' --port        Remote/Local port\n' +
-		' --local_port  Local port override\n' +
+		' --no-launch      Do not open VSCode web in the browser\n' +
+		' --scheme         Protocol (https or http)\n' +
+		' --host           Remote host\n' +
+		' --port           Remote/Local port\n' +
+		' --local_port     Local port override\n' +
+		' --extension      Path of an extension to include\n' +
+		' --verbose        Print out more information\n' +
 		' --help\n' +
 		'[Example]\n' +
 		' yarn web --scheme https --host example.com --port 8080 --local_port 30000'
@@ -60,103 +64,124 @@ const AUTHORITY = process.env.VSCODE_AUTHORITY || `${HOST}:${PORT}`;
 
 const exists = (path) => util.promisify(fs.exists)(path);
 const readFile = (path) => util.promisify(fs.readFile)(path);
-const CharCode_PC = '%'.charCodeAt(0);
+const readdir = (path) => util.promisify(fs.readdir)(path);
+const readdirWithFileTypes = (path) => util.promisify(fs.readdir)(path, { withFileTypes: true });
 
-async function initialize() {
-	const extensionFolders = await util.promisify(fs.readdir)(EXTENSIONS_ROOT);
+async function getBuiltInExtensionInfos() {
+	const extensions = [];
+	/** @type {Object.<string, string>} */
+	const locations = {};
 
-	const staticExtensions = [];
-
-	const webpackConfigs = [];
-
-	await Promise.all(extensionFolders.map(async extensionFolder => {
-		const packageJSONPath = path.join(EXTENSIONS_ROOT, extensionFolder, 'package.json');
-		if (await exists(packageJSONPath)) {
-			try {
-				const packageJSON = JSON.parse((await readFile(packageJSONPath)).toString());
-				if (packageJSON.main && !packageJSON.browser) {
-					return; // unsupported
-				}
-
-				if (packageJSON.browser) {
-					packageJSON.main = packageJSON.browser;
-
-					const webpackConfigLocations = await util.promisify(glob)(
-						path.join(EXTENSIONS_ROOT, extensionFolder, '**', 'extension-browser.webpack.config.js'),
-						{ ignore: ['**/node_modules'] }
-					);
-
-					for (const webpackConfigPath of webpackConfigLocations) {
-						const configOrFnOrArray = require(webpackConfigPath);
-						function addConfig(configOrFn) {
-							if (typeof configOrFn === 'function') {
-								webpackConfigs.push(configOrFn({}, {}));
-							} else {
-								webpackConfigs.push(configOrFn);
-							}
-						}
-						addConfig(configOrFnOrArray);
+	for (const extensionsRoot of [BUILTIN_EXTENSIONS_ROOT, BUILTIN_MARKETPLACE_EXTENSIONS_ROOT]) {
+		if (await exists(extensionsRoot)) {
+			const children = await readdirWithFileTypes(extensionsRoot);
+			await Promise.all(children.map(async child => {
+				if (child.isDirectory()) {
+					const extensionPath = path.join(extensionsRoot, child.name);
+					const info = await getBuiltInExtensionInfo(extensionPath);
+					if (info) {
+						extensions.push(info);
+						locations[path.basename(extensionPath)] = extensionPath;
 					}
 				}
-
-				const packageNlsPath = path.join(EXTENSIONS_ROOT, extensionFolder, 'package.nls.json');
-				if (await exists(packageNlsPath)) {
-					const packageNls = JSON.parse((await readFile(packageNlsPath)).toString());
-					const translate = (obj) => {
-						for (let key in obj) {
-							const val = obj[key];
-							if (Array.isArray(val)) {
-								val.forEach(translate);
-							} else if (val && typeof val === 'object') {
-								translate(val);
-							} else if (typeof val === 'string' && val.charCodeAt(0) === CharCode_PC && val.charCodeAt(val.length - 1) === CharCode_PC) {
-								const translated = packageNls[val.substr(1, val.length - 2)];
-								if (translated) {
-									obj[key] = translated;
-								}
-							}
-						}
-					};
-					translate(packageJSON);
-				}
-				packageJSON.extensionKind = ['web']; // enable for Web
-				staticExtensions.push({
-					packageJSON,
-					extensionLocation: { scheme: SCHEME, authority: AUTHORITY, path: `/static-extension/${extensionFolder}` },
-					isBuiltin: true
-				});
-			} catch (e) {
-				console.log(e);
-			}
+			}));
 		}
-	}));
-
-	return new Promise((resolve, reject) => {
-		if (args.watch) {
-			webpack(webpackConfigs).watch({}, (err, stats) => {
-				if (err) {
-					console.log(err);
-					reject();
-				} else {
-					console.log(stats.toString());
-					resolve(staticExtensions);
-				}
-			});
-		} else {
-			webpack(webpackConfigs).run((err, stats) => {
-				if (err) {
-					console.log(err);
-					reject();
-				} else {
-					console.log(stats.toString());
-					resolve(staticExtensions);
-				}
-			});
-		}
-	});
+	}
+	return { extensions, locations };
 }
 
-const staticExtensionsPromise = initialize();
+async function getBuiltInExtensionInfo(extensionPath) {
+	const packageJSON = await getExtensionPackageJSON(extensionPath);
+	if (!packageJSON) {
+		return undefined;
+	}
+	const builtInExtensionPath = path.basename(extensionPath);
+
+	let children = [];
+	try {
+		children = await readdir(extensionPath);
+	} catch (error) {
+		console.log(`Can not read extension folder ${extensionPath}: ${error}`);
+		return;
+	}
+	const readme = children.find(child => /^readme(\.txt|\.md|)$/i.test(child));
+	const changelog = children.find(child => /^changelog(\.txt|\.md|)$/i.test(child));
+	const packageJSONNLS = children.find(child => /^package.nls.json$/i.test(child));
+	return {
+		extensionPath: builtInExtensionPath,
+		packageJSON,
+		packageNLSPath: packageJSONNLS ? `${builtInExtensionPath}/${packageJSONNLS}` : undefined,
+		readmePath: readme ? `${builtInExtensionPath}/${readme}` : undefined,
+		changelogPath: changelog ? `${builtInExtensionPath}/${changelog}` : undefined
+	};
+}
+
+async function getDefaultExtensionInfos() {
+	const extensions = [];
+
+	/** @type {Object.<string, string>} */
+	const locations = {};
+
+	let extensionArg = args['extension'];
+	if (!extensionArg) {
+		return { extensions, locations }
+	}
+
+	const extensionPaths = Array.isArray(extensionArg) ? extensionArg : [extensionArg];
+	await Promise.all(extensionPaths.map(async extensionPath => {
+		extensionPath = path.resolve(process.cwd(), extensionPath);
+		const packageJSON = await getExtensionPackageJSON(extensionPath);
+		if (packageJSON) {
+			const extensionId = `${packageJSON.publisher}.${packageJSON.name}`;
+			extensions.push({
+				packageJSON,
+				extensionLocation: { scheme: SCHEME, authority: AUTHORITY, path: `/extension/${extensionId}` }
+			});
+			locations[extensionId] = extensionPath;
+		}
+	}));
+	return { extensions, locations };
+}
+
+async function getExtensionPackageJSON(extensionPath) {
+
+	const packageJSONPath = path.join(extensionPath, 'package.json');
+	if (await exists(packageJSONPath)) {
+		try {
+			let packageJSON = JSON.parse((await readFile(packageJSONPath)).toString());
+			if (packageJSON.main && !packageJSON.browser) {
+				return; // unsupported
+			}
+
+			if (packageJSON.browser) {
+				packageJSON.main = packageJSON.browser;
+
+				let mainFilePath = path.join(extensionPath, packageJSON.browser);
+				if (path.extname(mainFilePath) !== '.js') {
+					mainFilePath += '.js';
+				}
+				if (!await exists(mainFilePath)) {
+					fancyLog(`${ansiColors.yellow('Warning')}: Could not find ${mainFilePath}. Use ${ansiColors.cyan('yarn gulp watch-web')} to build the built-in extensions.`);
+				}
+			}
+			packageJSON.extensionKind = ['web']; // enable for Web
+
+			const packageNLSPath = path.join(extensionPath, 'package.nls.json');
+			const packageNLSExists = await exists(packageNLSPath);
+			if (packageNLSExists) {
+				packageJSON = extensions.translatePackageJSON(packageJSON, packageNLSPath); // temporary, until fixed in core
+			}
+
+			return packageJSON;
+		} catch (e) {
+			console.log(e);
+		}
+	}
+	return undefined;
+}
+
+const builtInExtensionsPromise = getBuiltInExtensionInfos();
+const defaultExtensionsPromise = getDefaultExtensionInfos();
 
 const mapCallbackUriToRequestId = new Map();
 
@@ -184,9 +209,13 @@ const server = http.createServer((req, res) => {
 			// static requests
 			return handleStatic(req, res, parsedUrl);
 		}
-		if (/^\/static-extension\//.test(pathname)) {
-			// static extension requests
-			return handleStaticExtension(req, res, parsedUrl);
+		if (/^\/extension\//.test(pathname)) {
+			// default extension requests
+			return handleExtension(req, res, parsedUrl);
+		}
+		if (/^\/builtin-extension\//.test(pathname)) {
+			// built-in extension requests
+			return handleBuiltInExtension(req, res, parsedUrl);
 		}
 		if (pathname === '/') {
 			// main web
@@ -237,13 +266,28 @@ function handleStatic(req, res, parsedUrl) {
  * @param {import('http').ServerResponse} res
  * @param {import('url').UrlWithParsedQuery} parsedUrl
  */
-function handleStaticExtension(req, res, parsedUrl) {
+async function handleExtension(req, res, parsedUrl) {
+	// Strip `/extension/` from the path
+	const relativePath = decodeURIComponent(parsedUrl.pathname.substr('/extension/'.length));
+	const filePath = getExtensionFilePath(relativePath, (await defaultExtensionsPromise).locations);
+	if (!filePath) {
+		return serveError(req, res, 400, `Bad request.`);
+	}
+	return serveFile(req, res, filePath);
+}
 
-	// Strip `/static-extension/` from the path
-	const relativeFilePath = path.normalize(decodeURIComponent(parsedUrl.pathname.substr('/static-extension/'.length)));
-
-	const filePath = path.join(EXTENSIONS_ROOT, relativeFilePath);
-
+/**
+ * @param {import('http').IncomingMessage} req
+ * @param {import('http').ServerResponse} res
+ * @param {import('url').UrlWithParsedQuery} parsedUrl
+ */
+async function handleBuiltInExtension(req, res, parsedUrl) {
+	// Strip `/builtin-extension/` from the path
+	const relativePath = decodeURIComponent(parsedUrl.pathname.substr('/builtin-extension/'.length));
+	const filePath = getExtensionFilePath(relativePath, (await builtInExtensionsPromise).locations);
+	if (!filePath) {
+		return serveError(req, res, 400, `Bad request.`);
+	}
 	return serveFile(req, res, filePath);
 }
 
@@ -252,31 +296,50 @@ function handleStaticExtension(req, res, parsedUrl) {
  * @param {import('http').ServerResponse} res
  */
 async function handleRoot(req, res) {
+	let folderUri = { scheme: 'memfs', path: `/sample-folder` };
+
 	const match = req.url && req.url.match(/\?([^#]+)/);
-	let ghPath;
 	if (match) {
 		const qs = new URLSearchParams(match[1]);
-		ghPath = qs.get('gh');
-		if (ghPath && !ghPath.startsWith('/')) {
-			ghPath = '/' + ghPath;
+
+		let gh = qs.get('gh');
+		if (gh) {
+			if (gh.startsWith('/')) {
+				gh = gh.substr(1);
+			}
+
+			const [owner, repo, ...branch] = gh.split('/', 3);
+			folderUri = { scheme: 'github', authority: branch.join('/') || 'HEAD', path: `/${owner}/${repo}` };
+		} else {
+			let cs = qs.get('cs');
+			if (cs) {
+				if (cs.startsWith('/')) {
+					cs = cs.substr(1);
+				}
+
+				const [owner, repo, ...branch] = cs.split('/');
+				folderUri = { scheme: 'codespace', authority: branch.join('/') || 'HEAD', path: `/${owner}/${repo}` };
+			}
 		}
 	}
 
-	const staticExtensions = await staticExtensionsPromise;
-	/** @type {WebConfiguration} */
-	const webConfig = {
-		staticExtensions: staticExtensions,
-	};
+	const { extensions: builtInExtensions } = await builtInExtensionsPromise;
+	const { extensions: staticExtensions } = await defaultExtensionsPromise;
+
+	if (args.verbose) {
+		fancyLog(`${ansiColors.magenta('BuiltIn extensions')}: ${builtInExtensions.map(e => path.basename(e.extensionPath)).join(', ')}`);
+		fancyLog(`${ansiColors.magenta('Additional extensions')}: ${staticExtensions.map(e => path.basename(e.extensionLocation.path)).join(', ') || 'None'}`);
+	}
 
 	const webConfigJSON = escapeAttribute(JSON.stringify({
-		...webConfig,
-		folderUri: ghPath
-			? { scheme: 'github', authority: 'HEAD', path: ghPath }
-			: { scheme: 'memfs', path: `/sample-folder` },
+		folderUri: folderUri,
+		staticExtensions,
+		builtinExtensionsServiceUrl: `${SCHEME}://${AUTHORITY}/builtin-extension`
 	}));
 
-	const data = (await util.promisify(fs.readFile)(WEB_MAIN)).toString()
+	const data = (await readFile(WEB_MAIN)).toString()
 		.replace('{{WORKBENCH_WEB_CONFIGURATION}}', () => webConfigJSON) // use a replace function to avoid that regexp replace patterns ($&, $0, ...) are applied
+		.replace('{{WORKBENCH_BUILTIN_EXTENSIONS}}', () => escapeAttribute(JSON.stringify(builtInExtensions)))
 		.replace('{{WEBVIEW_ENDPOINT}}', '')
 		.replace('{{REMOTE_USER_DATA_URI}}', '');
 
@@ -386,6 +449,25 @@ function escapeAttribute(value) {
 }
 
 /**
+ * @param {string} relativePath
+ * @param {Object.<string, string>} locations
+ * @returns {string | undefined}
+*/
+function getExtensionFilePath(relativePath, locations) {
+	const firstSlash = relativePath.indexOf('/');
+	if (firstSlash === -1) {
+		return undefined;
+	}
+	const extensionId = relativePath.substr(0, firstSlash);
+
+	const extensionPath = locations[extensionId];
+	if (!extensionPath) {
+		return undefined;
+	}
+	return path.join(extensionPath, relativePath.substr(firstSlash + 1));
+}
+
+/**
  * @param {import('http').IncomingMessage} req
  * @param {import('http').ServerResponse} res
  * @param {string} errorMessage
@@ -436,10 +518,6 @@ async function serveFile(req, res, filePath, responseHeaders = Object.create(nul
 
 		// Sanity checks
 		filePath = path.normalize(filePath); // ensure no "." and ".."
-		if (filePath.indexOf(`${APP_ROOT}${path.sep}`) !== 0) {
-			// invalid location outside of APP_ROOT
-			return serveError(req, res, 400, `Bad request.`);
-		}
 
 		const stat = await util.promisify(fs.stat)(filePath);
 

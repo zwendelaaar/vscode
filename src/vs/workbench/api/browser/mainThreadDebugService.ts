@@ -231,7 +231,8 @@ export class MainThreadDebugService implements MainThreadDebugServiceShape, IDeb
 		const debugOptions: IDebugSessionOptions = {
 			noDebug: options.noDebug,
 			parentSession: this.getSession(options.parentSessionID),
-			repl: options.repl
+			repl: options.repl,
+			compact: options.compact
 		};
 		return this.debugService.startDebugging(launch, nameOrConfig, debugOptions).then(success => {
 			return success;
@@ -257,6 +258,26 @@ export class MainThreadDebugService implements MainThreadDebugServiceShape, IDeb
 					return Promise.reject(new Error(response ? response.message : 'custom request failed'));
 				}
 			});
+		}
+		return Promise.reject(new Error('debug session not found'));
+	}
+
+	public $terminateDebugSession(sessionId: DebugSessionUUID): Promise<void> {
+		const session = this.debugService.getModel().getSession(sessionId, true);
+		if (session) {
+			return session.terminate();
+		}
+		return Promise.reject(new Error('debug session not found'));
+	}
+
+	public $stopDebugging(sessionId: DebugSessionUUID | undefined): Promise<void> {
+		if (sessionId) {
+			const session = this.debugService.getModel().getSession(sessionId, true);
+			if (session) {
+				return this.debugService.stopSession(session);
+			}
+		} else {	// stop all
+			return this.debugService.stopSession(undefined);
 		}
 		return Promise.reject(new Error('debug session not found'));
 	}

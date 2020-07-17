@@ -16,7 +16,7 @@ import { PanelPart } from 'vs/workbench/browser/parts/panel/panelPart';
 import { PanelRegistry, Extensions as PanelExtensions } from 'vs/workbench/browser/panel';
 import { Position, Parts, IWorkbenchLayoutService, positionFromString, positionToString } from 'vs/workbench/services/layout/browser/layoutService';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
-import { IStorageService, StorageScope, WillSaveStateReason, WorkspaceStorageSettings } from 'vs/platform/storage/common/storage';
+import { IStorageService, StorageScope, WillSaveStateReason } from 'vs/platform/storage/common/storage';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
 import { IPanelService } from 'vs/workbench/services/panel/common/panelService';
@@ -568,8 +568,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			return;
 		}
 
-		const firstOpen = storageService.getBoolean(WorkspaceStorageSettings.WORKSPACE_FIRST_OPEN, StorageScope.WORKSPACE);
-		if (!firstOpen) {
+		if (!storageService.isNew(StorageScope.WORKSPACE)) {
 			return;
 		}
 
@@ -790,7 +789,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 	private getInitialFilesToOpen(): { filesToOpenOrCreate?: IPath[], filesToDiff?: IPath[] } | undefined {
 		const defaultLayout = this.environmentService.options?.defaultLayout;
-		if (defaultLayout?.editors?.length && this.storageService.getBoolean(WorkspaceStorageSettings.WORKSPACE_FIRST_OPEN, StorageScope.WORKSPACE)) {
+		if (defaultLayout?.editors?.length && this.storageService.isNew(StorageScope.WORKSPACE)) {
 			this._openedDefaultEditors = true;
 
 			return {
@@ -841,88 +840,103 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			mark('didRestoreEditors');
 		})());
 
-		// Restore views
-		if (this.state.views.defaults?.length) {
-			mark('willOpenDefaultViews');
+		// Restore default views
+		const restoreDefaultViewsPromise = (async () => {
+			if (this.state.views.defaults?.length) {
+				mark('willOpenDefaultViews');
 
-			const defaultViews = [...this.state.views.defaults];
+				const defaultViews = [...this.state.views.defaults];
 
-			let locationsRestored: boolean[] = [];
+				let locationsRestored: boolean[] = [];
 
-			const tryOpenView = async (viewId: string, index: number) => {
-				const location = this.viewDescriptorService.getViewLocationById(viewId);
-				if (location) {
+				const tryOpenView = async (viewId: string, index: number) => {
+					const location = this.viewDescriptorService.getViewLocationById(viewId);
+					if (location) {
 
-					// If the view is in the same location that has already been restored, remove it and continue
-					if (locationsRestored[location]) {
-						defaultViews.splice(index, 1);
+						// If the view is in the same location that has already been restored, remove it and continue
+						if (locationsRestored[location]) {
+							defaultViews.splice(index, 1);
 
-						return;
+							return;
+						}
+
+						const view = await this.viewsService.openView(viewId);
+						if (view) {
+							locationsRestored[location] = true;
+							defaultViews.splice(index, 1);
+						}
 					}
-
-					const view = await this.viewsService.openView(viewId);
-					if (view) {
-						locationsRestored[location] = true;
-						defaultViews.splice(index, 1);
-					}
-				}
-			};
-
-			let i = -1;
-			for (const viewId of defaultViews) {
-				await tryOpenView(viewId, ++i);
-			}
-
-			// If we still have views left over, wait until all extensions have been registered and try again
-			if (defaultViews.length) {
-				await this.extensionService.whenInstalledExtensionsRegistered();
+				};
 
 				let i = -1;
 				for (const viewId of defaultViews) {
 					await tryOpenView(viewId, ++i);
 				}
-			}
 
-			// If we opened a view in the sidebar, stop any restore there
-			if (locationsRestored[ViewContainerLocation.Sidebar]) {
-				this.state.sideBar.viewletToRestore = undefined;
-			}
+				// If we still have views left over, wait until all extensions have been registered and try again
+				if (defaultViews.length) {
+					await this.extensionService.whenInstalledExtensionsRegistered();
 
-			// If we opened a view in the panel, stop any restore there
-			if (locationsRestored[ViewContainerLocation.Panel]) {
-				this.state.panel.panelToRestore = undefined;
-			}
+					let i = -1;
+					for (const viewId of defaultViews) {
+						await tryOpenView(viewId, ++i);
+					}
+				}
 
-			mark('didOpenDefaultViews');
-		}
+				// If we opened a view in the sidebar, stop any restore there
+				if (locationsRestored[ViewContainerLocation.Sidebar]) {
+					this.state.sideBar.viewletToRestore = undefined;
+				}
+
+				// If we opened a view in the panel, stop any restore there
+				if (locationsRestored[ViewContainerLocation.Panel]) {
+					this.state.panel.panelToRestore = undefined;
+				}
+
+				mark('didOpenDefaultViews');
+			}
+		})();
+		restorePromises.push(restoreDefaultViewsPromise);
 
 		// Restore Sidebar
-		if (this.state.sideBar.viewletToRestore) {
-			restorePromises.push((async () => {
-				mark('willRestoreViewlet');
+		restorePromises.push((async () => {
 
-				const viewlet = await this.viewletService.openViewlet(this.state.sideBar.viewletToRestore);
-				if (!viewlet) {
-					await this.viewletService.openViewlet(this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id); // fallback to default viewlet as needed
-				}
+			// Restoring views could mean that sidebar already
+			// restored, as such we need to test again
+			await restoreDefaultViewsPromise;
+			if (!this.state.sideBar.viewletToRestore) {
+				return;
+			}
 
-				mark('didRestoreViewlet');
-			})());
-		}
+			mark('willRestoreViewlet');
+
+			const viewlet = await this.viewletService.openViewlet(this.state.sideBar.viewletToRestore);
+			if (!viewlet) {
+				await this.viewletService.openViewlet(this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id); // fallback to default viewlet as needed
+			}
+
+			mark('didRestoreViewlet');
+		})());
 
 		// Restore Panel
-		if (this.state.panel.panelToRestore) {
-			restorePromises.push((async () => {
-				mark('willRestorePanel');
+		restorePromises.push((async () => {
 
-				const panel = await this.panelService.openPanel(this.state.panel.panelToRestore!);
-				if (!panel) {
-					await this.panelService.openPanel(Registry.as<PanelRegistry>(PanelExtensions.Panels).getDefaultPanelId()); // fallback to default panel as needed
-				}
+			// Restoring views could mean that panel already
+			// restored, as such we need to test again
+			await restoreDefaultViewsPromise;
+			if (!this.state.panel.panelToRestore) {
+				return;
+			}
 
-				mark('didRestorePanel');
-			})());
-		}
+			mark('willRestorePanel');
+
+			const panel = await this.panelService.openPanel(this.state.panel.panelToRestore!);
+			if (!panel) {
+				await this.panelService.openPanel(Registry.as<PanelRegistry>(PanelExtensions.Panels).getDefaultPanelId()); // fallback to default panel as needed
+			}
+
+			mark('didRestorePanel');
+		})());
 
 		// Restore Zen Mode
 		if (this.state.zenMode.restore) {
@@ -1743,11 +1757,10 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		const workbenchDimensions = this.getClientArea();
 		const width = this.storageService.getNumber(Storage.GRID_WIDTH, StorageScope.GLOBAL, workbenchDimensions.width);
 		const height = this.storageService.getNumber(Storage.GRID_HEIGHT, StorageScope.GLOBAL, workbenchDimensions.height);
-		// At some point, we will not fall back to old keys from legacy layout, but for now, let's migrate the keys
-		const sideBarSize = this.storageService.getNumber(Storage.SIDEBAR_SIZE, StorageScope.GLOBAL, this.storageService.getNumber('workbench.sidebar.width', StorageScope.GLOBAL, Math.min(workbenchDimensions.width / 4, 300)));
+		const sideBarSize = this.storageService.getNumber(Storage.SIDEBAR_SIZE, StorageScope.GLOBAL, Math.min(workbenchDimensions.width / 4, 300));
 		const panelDimension = positionFromString(this.storageService.get(Storage.PANEL_DIMENSION, StorageScope.GLOBAL, 'bottom'));
 		const fallbackPanelSize = this.state.panel.position === Position.BOTTOM ? workbenchDimensions.height / 3 : workbenchDimensions.width / 4;
-		const panelSize = panelDimension === this.state.panel.position ? this.storageService.getNumber(Storage.PANEL_SIZE, StorageScope.GLOBAL, this.storageService.getNumber(this.state.panel.position === Position.BOTTOM ? 'workbench.panel.height' : 'workbench.panel.width', StorageScope.GLOBAL, fallbackPanelSize)) : fallbackPanelSize;
+		const panelSize = panelDimension === this.state.panel.position ? this.storageService.getNumber(Storage.PANEL_SIZE, StorageScope.GLOBAL, fallbackPanelSize) : fallbackPanelSize;
 
 		const titleBarHeight = this.titleBarPartView.minimumHeight;
 		const statusBarHeight = this.statusBarPartView.minimumHeight;

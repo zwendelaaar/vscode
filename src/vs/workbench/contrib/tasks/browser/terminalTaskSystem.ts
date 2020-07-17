@@ -46,6 +46,7 @@ import { IPanelService } from 'vs/workbench/services/panel/common/panelService';
 import { IPathService } from 'vs/workbench/services/path/common/pathService';
 import { env as processEnv, cwd as processCwd } from 'vs/base/common/process';
 import { IViewsService, IViewDescriptorService, ViewContainerLocation } from 'vs/workbench/common/views';
+import { ILogService } from 'vs/platform/log/common/log';
 
 interface TerminalData {
 	terminal: ITerminalInstance;
@@ -202,6 +203,7 @@ export class TerminalTaskSystem implements ITaskSystem {
 		private terminalInstanceService: ITerminalInstanceService,
 		private pathService: IPathService,
 		private viewDescriptorService: IViewDescriptorService,
+		private logService: ILogService,
 		taskSystemInfoResolver: TaskSystemInfoResolver,
 	) {
 
@@ -494,12 +496,15 @@ export class TerminalTaskSystem implements ITaskSystem {
 		}
 	}
 
-	private resolveAndFindExecutable(workspaceFolder: IWorkspaceFolder | undefined, task: CustomTask | ContributedTask, cwd: string | undefined, envPath: string | undefined): Promise<string> {
-		return this.findExecutable(
-			this.configurationResolverService.resolve(workspaceFolder, CommandString.value(task.command.name!)),
-			cwd ? this.configurationResolverService.resolve(workspaceFolder, cwd) : undefined,
-			envPath ? envPath.split(path.delimiter).map(p => this.configurationResolverService.resolve(workspaceFolder, p)) : undefined
-		);
+	private async resolveAndFindExecutable(systemInfo: TaskSystemInfo | undefined, workspaceFolder: IWorkspaceFolder | undefined, task: CustomTask | ContributedTask, cwd: string | undefined, envPath: string | undefined): Promise<string> {
+		const command = this.configurationResolverService.resolve(workspaceFolder, CommandString.value(task.command.name!));
+		cwd = cwd ? this.configurationResolverService.resolve(workspaceFolder, cwd) : undefined;
+		const paths = envPath ? envPath.split(path.delimiter).map(p => this.configurationResolverService.resolve(workspaceFolder, p)) : undefined;
+		let foundExecutable = await systemInfo?.findExecutable(command, cwd, paths);
+		if (!foundExecutable) {
+			foundExecutable = await this.findExecutable(command, cwd, paths);
+		}
+		return foundExecutable;
 	}
 
 	private findUnresolvedVariables(variables: Set<string>, alreadyResolved: Map<string, string>): Set<string> {
@@ -560,7 +565,7 @@ export class TerminalTaskSystem implements ITaskSystem {
 				if (isProcess) {
 					let process = CommandString.value(task.command.name!);
 					if (taskSystemInfo.platform === Platform.Platform.Windows) {
-						process = await this.resolveAndFindExecutable(workspaceFolder, task, cwd, envPath);
+						process = await this.resolveAndFindExecutable(taskSystemInfo, workspaceFolder, task, cwd, envPath);
 					}
 					resolved.variables.set(TerminalTaskSystem.ProcessVarName, process);
 				}
@@ -579,7 +584,7 @@ export class TerminalTaskSystem implements ITaskSystem {
 						if (isProcess) {
 							let processVarValue: string;
 							if (Platform.isWindows) {
-								processVarValue = await this.resolveAndFindExecutable(workspaceFolder, task, cwd, envPath);
+								processVarValue = await this.resolveAndFindExecutable(taskSystemInfo, workspaceFolder, task, cwd, envPath);
 							} else {
 								processVarValue = this.configurationResolverService.resolve(workspaceFolder, CommandString.value(task.command.name!));
 							}
@@ -722,7 +727,7 @@ export class TerminalTaskSystem implements ITaskSystem {
 					processStartedSignaled = true;
 				}
 			}, (_error) => {
-				// The process never got ready. Need to think how to handle this.
+				this.logService.error('Task terminal process never got ready');
 			});
 			this._onDidStateChange.fire(TaskEvent.create(TaskEventKind.Start, task, terminal.id));
 			let skipLine: boolean = (!!task.command.presentation && task.command.presentation.echo);
@@ -966,7 +971,7 @@ export class TerminalTaskSystem implements ITaskSystem {
 				windowsShellArgs = true;
 				let basename = path.basename(shellLaunchConfig.executable!).toLowerCase();
 				// If we don't have a cwd, then the terminal uses the home dir.
-				const userHome = await this.pathService.userHome;
+				const userHome = await this.pathService.userHome();
 				if (basename === 'cmd.exe' && ((options.cwd && isUNC(options.cwd)) || (!options.cwd && isUNC(userHome.fsPath)))) {
 					return undefined;
 				}
